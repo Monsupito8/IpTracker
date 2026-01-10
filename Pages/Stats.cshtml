@@ -1,0 +1,304 @@
+@page "/stats/{id}"
+@using IpTracker.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+
+@{
+    var linkId = RouteData.Values["id"]?.ToString();
+    var link = await DbContext.TrackingLinks
+        .Include(l => l.Visits)
+        .FirstOrDefaultAsync(l => l.Id == linkId);
+    
+    if (link == null)
+    {
+        <h2>Ссылка не найдена</h2>
+        return;
+    }
+    
+    var uniqueVisitors = link.Visits
+        .GroupBy(v => v.VisitorIp)
+        .Select(g => new { Ip = g.Key, Count = g.Count() })
+        .ToList();
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика ссылки: @link.Id</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        .header .link-id {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 50px;
+            display: inline-block;
+            font-family: monospace;
+            font-size: 1.2rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            padding: 40px;
+        }
+        .stat-card {
+            background: #f8fafc;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            border: 2px solid #e2e8f0;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .stat-number {
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #4f46e5;
+            margin: 20px 0;
+        }
+        .stat-label {
+            color: #64748b;
+            font-size: 1.1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .info-section {
+            padding: 0 40px 40px;
+        }
+        .info-card {
+            background: #f1f5f9;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        .info-row {
+            display: flex;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .info-label {
+            font-weight: 600;
+            color: #475569;
+            min-width: 200px;
+        }
+        .info-value {
+            color: #334155;
+        }
+        .visits-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .visits-table th {
+            background: #4f46e5;
+            color: white;
+            padding: 15px;
+            text-align: left;
+        }
+        .visits-table td {
+            padding: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .visits-table tr:hover {
+            background: #f8fafc;
+        }
+        .ip-badge {
+            background: #e0e7ff;
+            color: #4f46e5;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: all 0.3s;
+            border: none;
+            cursor: pointer;
+            margin: 10px;
+        }
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
+        }
+        .btn-secondary {
+            background: #64748b;
+        }
+        .actions {
+            text-align: center;
+            padding: 30px;
+            background: #f8fafc;
+            border-top: 2px solid #e2e8f0;
+        }
+        @media (max-width: 768px) {
+            .stats-grid { grid-template-columns: 1fr; padding: 20px; }
+            .header { padding: 30px 20px; }
+            .info-section { padding: 0 20px 20px; }
+            .info-row { flex-direction: column; }
+            .info-label { min-width: auto; margin-bottom: 5px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Статистика ссылки</h1>
+            <div class="link-id">@link.Id</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number">@link.Visits.Count</div>
+                <div class="stat-label">Всего переходов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">@uniqueVisitors.Count</div>
+                <div class="stat-label">Уникальных посетителей</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">@link.Visits.Count(v => v.VisitedAt.Date == DateTime.UtcNow.Date)</div>
+                <div class="stat-label">Переходов сегодня</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">@(link.Visits.Max(v => v.VisitedAt).ToString("HH:mm"))</div>
+                <div class="stat-label">Последний визит</div>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <div class="info-card">
+                <h2 style="margin-bottom: 20px; color: #4f46e5;">📝 Информация о ссылке</h2>
+                <div class="info-row">
+                    <div class="info-label">ID ссылки:</div>
+                    <div class="info-value">@link.Id</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Создана:</div>
+                    <div class="info-value">@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">IP создателя:</div>
+                    <div class="info-value ip-badge">@link.CreatorIp</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Целевой URL:</div>
+                    <div class="info-value">
+                        <a href="@link.TargetUrl" target="_blank" style="color: #4f46e5; text-decoration: none;">
+                            @link.TargetUrl
+                        </a>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(link.Note))
+                {
+                    <div class="info-row">
+                        <div class="info-label">Примечание:</div>
+                        <div class="info-value">@link.Note</div>
+                    </div>
+                }
+            </div>
+
+            <div class="info-card">
+                <h2 style="margin-bottom: 20px; color: #4f46e5;">👥 История переходов</h2>
+                @if (link.Visits.Any())
+                {
+                    <table class="visits-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Время</th>
+                                <th>IP-адрес</th>
+                                <th>Браузер</th>
+                                <th>Откуда пришел</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{ int counter = 1; }
+                            @foreach (var visit in link.Visits.OrderByDescending(v => v.VisitedAt))
+                            {
+                                <tr>
+                                    <td>@counter</td>
+                                    <td>@visit.VisitedAt.ToString("dd.MM.yyyy HH:mm:ss")</td>
+                                    <td><span class="ip-badge">@visit.VisitorIp</span></td>
+                                    <td>@GetBrowserName(visit.UserAgent)</td>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(visit.Referer))
+                                        {
+                                            <a href="@visit.Referer" target="_blank" style="color: #4f46e5;">
+                                                @(visit.Referer.Length > 50 ? visit.Referer.Substring(0, 50) + "..." : visit.Referer)
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span style="color: #94a3b8;">—</span>
+                                        }
+                                    </td>
+                                </tr>
+                                counter++;
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p style="text-align: center; color: #94a3b8; padding: 40px;">Пока нет переходов</p>
+                }
+            </div>
+        </div>
+
+        <div class="actions">
+            <a href="/track/@link.Id" class="btn" target="_blank">🔗 Протестировать ссылку</a>
+            <a href="/api/tracker/stats/@link.Id" class="btn btn-secondary">📥 Получить JSON</a>
+            <a href="/" class="btn btn-secondary">🏠 На главную</a>
+        </div>
+    </div>
+</body>
+</html>
+
+@functions {
+    private string GetBrowserName(string userAgent)
+    {
+        if (userAgent.Contains("Chrome")) return "Chrome";
+        if (userAgent.Contains("Firefox")) return "Firefox";
+        if (userAgent.Contains("Safari")) return "Safari";
+        if (userAgent.Contains("Edge")) return "Edge";
+        if (userAgent.Contains("Opera")) return "Opera";
+        return "Другой";
+    }
+}
