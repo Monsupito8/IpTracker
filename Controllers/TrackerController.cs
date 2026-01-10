@@ -24,7 +24,6 @@ namespace IpTracker.Controllers
         }
 
         // Генерация новой отслеживаемой ссылки
-        // Генерация новой отслеживаемой ссылки
         [HttpPost("generate")]
         public async Task<IActionResult> GenerateLink([FromBody] GenerateRequest request)
         {
@@ -54,7 +53,7 @@ namespace IpTracker.Controllers
                 _context.TrackingLinks.Add(trackingLink);
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation($"Создана ссылка: {linkId}");
+                _logger.LogInformation($"Создана ссылка: {linkId} для URL: {request.TargetUrl}");
 
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
@@ -63,7 +62,7 @@ namespace IpTracker.Controllers
                     success = true,
                     trackingUrl = $"{baseUrl}/track/{linkId}",
                     adminUrl = $"{baseUrl}/admin/{linkId}",
-                    targetUrl = trackingLink.TargetUrl,  // ← ДОБАВЬ ЭТУ СТРОКУ!
+                    targetUrl = trackingLink.TargetUrl,
                     linkId = linkId,
                     createdAt = trackingLink.CreatedAt,
                     message = "Ссылка успешно создана"
@@ -76,47 +75,56 @@ namespace IpTracker.Controllers
             }
         }
 
-        // Обработка перехода по ссылке
+        // Обработка перехода по ссылке - ИСПРАВЛЕННАЯ ВЕРСИЯ
         [HttpGet("track/{id}")]
+        [Route("track/{id}")]  // Добавляем явный маршрут
         public async Task<IActionResult> Track(string id)
         {
             try
             {
+                _logger.LogInformation($"Начало обработки перехода по ссылке: {id}");
+                
                 var link = await _context.TrackingLinks.FindAsync(id);
                 if (link == null)
                 {
-                    return NotFound(new { success = false, message = "Ссылка не найдена" });
+                    _logger.LogWarning($"Ссылка не найдена: {id}");
+                    return NotFound("Ссылка не найдена");
                 }
 
+                // Получаем данные о посещении
                 var clientIp = await GetRealIpAsync();
                 var userAgent = Request.Headers["User-Agent"].ToString();
                 var referer = Request.Headers["Referer"].ToString();
+                var visitedAt = DateTime.UtcNow;
 
-                _logger.LogInformation($"Переход по ссылке {id} с IP: {clientIp}");
+                _logger.LogInformation($"Переход по ссылке {id} с IP: {clientIp}, User-Agent: {userAgent}");
 
+                // Сохраняем посещение в базу
                 var visit = new LinkVisit
                 {
                     LinkId = id,
                     VisitorIp = clientIp,
                     UserAgent = userAgent,
                     Referer = string.IsNullOrEmpty(referer) ? null : referer,
-                    VisitedAt = DateTime.UtcNow
+                    VisitedAt = visitedAt
                 };
 
                 _context.LinkVisits.Add(visit);
                 await _context.SaveChangesAsync();
 
+                _logger.LogInformation($"Сохранено посещение для ссылки {id}. ID посещения: {visit.Id}");
+
+                // Перенаправляем пользователя
                 return Redirect(link.TargetUrl ?? "https://google.com");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Ошибка при обработке перехода по ссылке {id}");
+                _logger.LogError(ex, $"ОШИБКА при обработке перехода по ссылке {id}");
                 return Redirect("https://google.com");
             }
         }
 
-        // Просмотр статистики в JSON формате
-        // Просмотр статистики в JSON формате
+        // ОБНОВЛЕННЫЙ метод GetStats - теперь показывает правильные данные
         [HttpGet("stats/{id}")]
         public async Task<IActionResult> GetStats(string id)
         {
@@ -130,6 +138,9 @@ namespace IpTracker.Controllers
                 {
                     return NotFound(new { success = false, message = "Ссылка не найдена" });
                 }
+
+                // Логируем для отладки
+                _logger.LogInformation($"Статистика для ссылки {id}: {link.Visits.Count} посещений");
 
                 var uniqueVisitors = link.Visits
                     .GroupBy(v => v.VisitorIp)
@@ -151,8 +162,8 @@ namespace IpTracker.Controllers
                         createdAt = link.CreatedAt,
                         creatorIp = link.CreatorIp,
                         note = link.Note,
-                        targetUrl = link.TargetUrl,  // ← УЖЕ ЕСТЬ
-                        trackingUrl = $"{Request.Scheme}://{Request.Host}/track/{link.Id}"  // ← ДОБАВЬ
+                        targetUrl = link.TargetUrl,
+                        trackingUrl = $"{Request.Scheme}://{Request.Host}/track/{link.Id}"
                     },
                     statistics = new
                     {
@@ -185,112 +196,9 @@ namespace IpTracker.Controllers
             }
         }
 
-        // Получение информации о конкретном посещении (для админки)
-        [HttpGet("visit/{id}")]
-        public async Task<IActionResult> GetVisit(int id)
-        {
-            try
-            {
-                var visit = await _context.LinkVisits
-                    .Include(v => v.Link)
-                    .FirstOrDefaultAsync(v => v.Id == id);
-
-                if (visit == null)
-                {
-                    return NotFound(new { success = false, message = "Посещение не найдено" });
-                }
-
-                return Ok(new
-                {
-                    success = true,
-                    id = visit.Id,
-                    visitorIp = visit.VisitorIp,
-                    userAgent = visit.UserAgent,
-                    browserName = GetBrowserName(visit.UserAgent),
-                    osName = GetOSName(visit.UserAgent),
-                    deviceType = GetDeviceType(visit.UserAgent),
-                    referer = visit.Referer,
-                    visitedAt = visit.VisitedAt,
-                    linkId = visit.LinkId,
-                    linkNote = visit.Link?.Note
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Ошибка при получении посещения {id}");
-                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
-            }
-        }
-
-        // Удаление посещения
-        [HttpDelete("visit/{id}")]
-        public async Task<IActionResult> DeleteVisit(int id)
-        {
-            try
-            {
-                var visit = await _context.LinkVisits.FindAsync(id);
-                if (visit == null)
-                {
-                    return NotFound(new { success = false, message = "Посещение не найдено" });
-                }
-
-                _context.LinkVisits.Remove(visit);
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation($"Удалено посещение ID: {id}");
-
-                return Ok(new
-                {
-                    success = true,
-                    message = "Посещение удалено"
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Ошибка при удалении посещения {id}");
-                return StatusCode(500, new { success = false, message = "Ошибка при удалении" });
-            }
-        }
-
-        // Получение всех ссылок
-        [HttpGet("links")]
-        public async Task<IActionResult> GetAllLinks()
-        {
-            try
-            {
-                var links = await _context.TrackingLinks
-                    .Include(l => l.Visits)
-                    .OrderByDescending(l => l.CreatedAt)
-                    .Select(l => new
-                    {
-                        id = l.Id,
-                        createdAt = l.CreatedAt,
-                        creatorIp = l.CreatorIp,
-                        note = l.Note,
-                        targetUrl = l.TargetUrl,
-                        visitsCount = l.Visits.Count,
-                        uniqueVisitors = l.Visits.GroupBy(v => v.VisitorIp).Count(),
-                        lastVisit = l.Visits.Max(v => (DateTime?)v.VisitedAt)
-                    })
-                    .ToListAsync();
-
-                return Ok(new
-                {
-                    success = true,
-                    links = links,
-                    total = links.Count
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Ошибка при получении списка ссылок");
-                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
-            }
-        }
-
-        // Получение всех посещений
+        // Получение всех посещений (исправленная версия)
         [HttpGet("visits")]
-        public async Task<IActionResult> GetAllVisits([FromQuery] int limit = 500)
+        public async Task<IActionResult> GetAllVisits([FromQuery] int limit = 50)
         {
             try
             {
@@ -313,6 +221,9 @@ namespace IpTracker.Controllers
                     })
                     .ToListAsync();
 
+                // Логируем для отладки
+                _logger.LogInformation($"Получено {visits.Count} посещений из базы данных");
+
                 return Ok(new
                 {
                     success = true,
@@ -327,69 +238,45 @@ namespace IpTracker.Controllers
             }
         }
 
-        // Получение информации о IP
-        [HttpGet("ipinfo/{ip}")]
-        public async Task<IActionResult> GetIpInfo(string ip)
+        // Получение всех ссылок (исправленная версия)
+        [HttpGet("links")]
+        public async Task<IActionResult> GetAllLinks()
         {
             try
             {
-                if (string.IsNullOrEmpty(ip) || ip == "Unknown" || ip == "::1" || ip == "127.0.0.1")
-                {
-                    return Ok(new
+                var links = await _context.TrackingLinks
+                    .Include(l => l.Visits)
+                    .OrderByDescending(l => l.CreatedAt)
+                    .Select(l => new
                     {
-                        success = true,
-                        ip = ip,
-                        type = "Локальный IP",
-                        message = "Это локальный IP адрес (ваш компьютер или сервер)"
-                    });
-                }
+                        id = l.Id,
+                        createdAt = l.CreatedAt,
+                        creatorIp = l.CreatorIp,
+                        note = l.Note,
+                        targetUrl = l.TargetUrl,
+                        visitsCount = l.Visits.Count,
+                        uniqueVisitors = l.Visits.GroupBy(v => v.VisitorIp).Count(),
+                        lastVisit = l.Visits.Max(v => (DateTime?)v.VisitedAt)
+                    })
+                    .ToListAsync();
 
-                using var httpClient = new HttpClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(3);
-
-                try
+                // Логируем для отладки
+                foreach (var link in links)
                 {
-                    var response = await httpClient.GetAsync($"http://ipwho.is/{ip}");
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var content = await response.Content.ReadAsStringAsync();
-                        var json = System.Text.Json.JsonDocument.Parse(content);
-
-                        return Ok(new
-                        {
-                            success = true,
-                            ip = ip,
-                            country = json.RootElement.GetProperty("country").GetString(),
-                            region = json.RootElement.GetProperty("region").GetString(),
-                            city = json.RootElement.GetProperty("city").GetString(),
-                            isp = json.RootElement.GetProperty("connection").GetProperty("isp").GetString(),
-                            org = json.RootElement.GetProperty("connection").GetProperty("org").GetString(),
-                            latitude = json.RootElement.GetProperty("latitude").GetDouble(),
-                            longitude = json.RootElement.GetProperty("longitude").GetDouble(),
-                            timezone = json.RootElement.GetProperty("timezone").GetProperty("id").GetString(),
-                            source = "ipwho.is"
-                        });
-                    }
+                    _logger.LogInformation($"Ссылка {link.id}: {link.visitsCount} посещений");
                 }
-                catch { }
 
                 return Ok(new
                 {
                     success = true,
-                    ip = ip,
-                    message = "Информация об IP ограничена",
-                    type = GetIpType(ip)
+                    links = links,
+                    total = links.Count
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Ошибка при получении информации об IP {ip}");
-                return Ok(new
-                {
-                    success = true,
-                    ip = ip,
-                    message = "Ошибка при получении информации"
-                });
+                _logger.LogError(ex, "Ошибка при получении списка ссылок");
+                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
             }
         }
 
@@ -428,6 +315,46 @@ namespace IpTracker.Controllers
             {
                 _logger.LogError(ex, $"Ошибка при удалении ссылки {id}");
                 return StatusCode(500, new { success = false, message = "Ошибка при удалении" });
+            }
+        }
+
+        // Тестовый метод для проверки базы данных
+        [HttpGet("test")]
+        public async Task<IActionResult> Test()
+        {
+            try
+            {
+                var linksCount = await _context.TrackingLinks.CountAsync();
+                var visitsCount = await _context.LinkVisits.CountAsync();
+                
+                var lastVisits = await _context.LinkVisits
+                    .OrderByDescending(v => v.Id)
+                    .Take(5)
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    database = "Работает",
+                    linksCount = linksCount,
+                    visitsCount = visitsCount,
+                    lastVisits = lastVisits.Select(v => new
+                    {
+                        id = v.Id,
+                        linkId = v.LinkId,
+                        ip = v.VisitorIp,
+                        time = v.VisitedAt
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                return Ok(new
+                {
+                    success = false,
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
+                });
             }
         }
 
@@ -534,6 +461,7 @@ namespace IpTracker.Controllers
 
         private string GetBrowserName(string userAgent)
         {
+            if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
             if (userAgent.Contains("Chrome")) return "Chrome";
             if (userAgent.Contains("Firefox")) return "Firefox";
             if (userAgent.Contains("Safari") && !userAgent.Contains("Chrome")) return "Safari";
@@ -544,6 +472,7 @@ namespace IpTracker.Controllers
 
         private string GetOSName(string userAgent)
         {
+            if (string.IsNullOrEmpty(userAgent)) return "Unknown OS";
             if (userAgent.Contains("Windows")) return "Windows";
             if (userAgent.Contains("Mac OS")) return "macOS";
             if (userAgent.Contains("Linux")) return "Linux";
@@ -554,9 +483,10 @@ namespace IpTracker.Controllers
 
         private string GetDeviceType(string userAgent)
         {
-            if (userAgent.Contains("Mobile")) return "Mobile";
-            if (userAgent.Contains("Tablet")) return "Tablet";
-            return "Desktop";
+            if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
+            if (userAgent.Contains("Mobile")) return "Мобильный";
+            if (userAgent.Contains("Tablet")) return "Планшет";
+            return "Компьютер";
         }
     }
 

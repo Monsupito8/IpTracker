@@ -3,6 +3,9 @@
 @using Microsoft.EntityFrameworkCore
 @inject ApplicationDbContext DbContext
 
+@implements IDisposable
+@implements IAsyncDisposable
+
 @{
     var allLinks = await DbContext.TrackingLinks
         .Include(l => l.Visits)
@@ -79,6 +82,7 @@
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
             border-top: 3px solid #4285f4;
+            position: relative;
         }
         .stat-card.blue { border-top-color: #4285f4; }
         .stat-card.green { border-top-color: #34a853; }
@@ -94,6 +98,13 @@
             color: #666;
             font-size: 0.9rem;
             margin-top: 8px;
+        }
+        .stat-update {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 0.8rem;
+            color: #888;
         }
         .create-section {
             background: white;
@@ -243,6 +254,10 @@
             background: #f8f9fa;
             color: #666;
         }
+        .new-visit {
+            background-color: #e8f5e8 !important;
+            animation: highlight 2s;
+        }
         .tabs {
             display: flex;
             gap: 10px;
@@ -271,11 +286,6 @@
         }
         .tab-content.active {
             display: block;
-            animation: fadeIn 0.3s;
-        }
-        @@keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
         }
         .empty-state {
             text-align: center;
@@ -330,8 +340,49 @@
             background: #4285f4;
             border-radius: 5px;
         }
+        .refresh-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 8px 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .refresh-btn:hover {
+            background: #eee;
+        }
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            color: #666;
+        }
+        .auto-refresh label {
+            margin-bottom: 0;
+        }
+        .last-update {
+            color: #888;
+            font-size: 0.85rem;
+            text-align: right;
+            margin-top: 10px;
+        }
         
-        /* МЕДИА-ЗАПРОСЫ (исправлено - два @@) */
+        @@keyframes highlight {
+            0% { background-color: #e8f5e8; }
+            100% { background-color: white; }
+        }
+        
+        @@keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
         @@media (max-width: 768px) {
             .container { padding: 10px; }
             .stats-grid { grid-template-columns: 1fr; }
@@ -343,27 +394,40 @@
 </head>
 <body>
     <div class="container">
+        <button class="refresh-btn" onclick="refreshData()">
+            <i class="fas fa-sync-alt"></i> Обновить
+        </button>
+        
         <div class="header">
             <h1><i class="fas fa-link"></i> Менеджер ссылок</h1>
             <p style="color: #666;">Создавайте и отслеживайте перенаправления</p>
+            
+            <div class="auto-refresh">
+                <input type="checkbox" id="autoRefresh" checked>
+                <label for="autoRefresh">Автообновление каждые 10 секунд</label>
+            </div>
         </div>
         
         <div class="stats-grid">
             <div class="stat-card blue">
-                <div class="stat-number">@totalVisits</div>
+                <div class="stat-number" id="totalVisits">@totalVisits</div>
                 <div class="stat-label">Всего переходов</div>
+                <div class="stat-update" id="visitsUpdate">обновлено</div>
             </div>
             <div class="stat-card green">
-                <div class="stat-number">@uniqueIPs</div>
+                <div class="stat-number" id="uniqueIPs">@uniqueIPs</div>
                 <div class="stat-label">Уникальных посетителей</div>
+                <div class="stat-update" id="ipsUpdate">обновлено</div>
             </div>
             <div class="stat-card orange">
-                <div class="stat-number">@todayVisits</div>
+                <div class="stat-number" id="todayVisits">@todayVisits</div>
                 <div class="stat-label">Переходов сегодня</div>
+                <div class="stat-update" id="todayUpdate">обновлено</div>
             </div>
             <div class="stat-card red">
-                <div class="stat-number">@yesterdayVisits</div>
+                <div class="stat-number" id="yesterdayVisits">@yesterdayVisits</div>
                 <div class="stat-label">Вчера</div>
+                <div class="stat-update" id="yesterdayUpdate">обновлено</div>
             </div>
         </div>
         
@@ -435,10 +499,10 @@
                                 <th style="width: 120px;">Действия</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="links-body">
                             @foreach (var link in allLinks)
                             {
-                                <tr>
+                                <tr data-link-id="@link.Id" id="link-row-@link.Id">
                                     <td><strong>@link.Id</strong></td>
                                     <td>@(link.Note ?? "Без названия")</td>
                                     <td class="url-cell">
@@ -446,7 +510,7 @@
                                             @link.TargetUrl
                                         </a>
                                     </td>
-                                    <td><strong>@link.Visits.Count</strong></td>
+                                    <td id="visits-count-@link.Id"><strong>@link.Visits.Count</strong></td>
                                     <td>@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</td>
                                     <td>
                                         <button class="btn" style="padding: 6px 12px; font-size: 0.85rem;" 
@@ -489,10 +553,10 @@
                                 <th>Устройство</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="visits-body">
                             @foreach (var visit in allVisits.Take(50))
                             {
-                                <tr>
+                                <tr data-visit-id="@visit.Id">
                                     <td>@visit.VisitedAt.ToString("dd.MM HH:mm:ss")</td>
                                     <td><span class="ip-badge">@visit.VisitorIp</span></td>
                                     <td><span class="browser-badge">@GetBrowserName(visit.UserAgent)</span></td>
@@ -513,7 +577,7 @@
                 @if (allVisits.Count > 50)
                 {
                     <p style="text-align: center; color: #666; margin-top: 15px;">
-                        Показано 50 из @allVisits.Count посещений
+                        Показано 50 из <span id="total-visits-count">@allVisits.Count</span> посещений
                     </p>
                 }
             }
@@ -532,62 +596,228 @@
             <div class="stats-chart">
                 <div class="chart-container">
                     <h3>📊 Браузеры посетителей</h3>
-                    @foreach (var browser in browserStats)
-                    {
-                        var percentage = totalVisits > 0 ? (browser.Count * 100 / totalVisits) : 0;
-                        <div style="margin-bottom: 15px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                <span>@browser.Browser</span>
-                                <span>@browser.Count (@percentage%)</span>
+                    <div id="browser-stats">
+                        @foreach (var browser in browserStats)
+                        {
+                            var percentage = totalVisits > 0 ? (browser.Count * 100 / totalVisits) : 0;
+                            <div style="margin-bottom: 15px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                    <span>@browser.Browser</span>
+                                    <span>@browser.Count (@percentage%)</span>
+                                </div>
+                                <div class="chart-bar">
+                                    <div class="chart-fill" style="width: @percentage%"></div>
+                                </div>
                             </div>
-                            <div class="chart-bar">
-                                <div class="chart-fill" style="width: @percentage%"></div>
-                            </div>
-                        </div>
-                    }
+                        }
+                    </div>
                 </div>
                 
                 <div class="chart-container">
                     <h3>📱 Устройства</h3>
-                    @{
-                        var desktopCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Компьютер");
-                        var mobileCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Мобильный");
-                        var tabletCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Планшет");
-                    }
-                    <div style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>Компьютер</span>
-                            <span>@desktopCount</span>
+                    <div id="device-stats">
+                        @{
+                            var desktopCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Компьютер");
+                            var mobileCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Мобильный");
+                            var tabletCount = allVisits.Count(v => GetDeviceType(v.UserAgent) == "Планшет");
+                        }
+                        <div style="margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                <span>Компьютер</span>
+                                <span id="desktop-count">@desktopCount</span>
+                            </div>
+                            <div class="chart-bar">
+                                <div class="chart-fill" id="desktop-bar" style="width: @(totalVisits > 0 ? desktopCount * 100 / totalVisits : 0)%"></div>
+                            </div>
                         </div>
-                        <div class="chart-bar">
-                            <div class="chart-fill" style="width: @(totalVisits > 0 ? desktopCount * 100 / totalVisits : 0)%"></div>
+                        <div style="margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                <span>Мобильный</span>
+                                <span id="mobile-count">@mobileCount</span>
+                            </div>
+                            <div class="chart-bar">
+                                <div class="chart-fill" id="mobile-bar" style="width: @(totalVisits > 0 ? mobileCount * 100 / totalVisits : 0)%"></div>
+                            </div>
                         </div>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>Мобильный</span>
-                            <span>@mobileCount</span>
-                        </div>
-                        <div class="chart-bar">
-                            <div class="chart-fill" style="width: @(totalVisits > 0 ? mobileCount * 100 / totalVisits : 0)%"></div>
-                        </div>
-                    </div>
-                    <div style="margin-bottom: 15px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                            <span>Планшет</span>
-                            <span>@tabletCount</span>
-                        </div>
-                        <div class="chart-bar">
-                            <div class="chart-fill" style="width: @(totalVisits > 0 ? tabletCount * 100 / totalVisits : 0)%"></div>
+                        <div style="margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                <span>Планшет</span>
+                                <span id="tablet-count">@tabletCount</span>
+                            </div>
+                            <div class="chart-bar">
+                                <div class="chart-fill" id="tablet-bar" style="width: @(totalVisits > 0 ? tabletCount * 100 / totalVisits : 0)%"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+        
+        <div class="last-update">
+            Последнее обновление: <span id="lastUpdateTime">@DateTime.Now.ToString("HH:mm:ss")</span>
+        </div>
     </div>
 
     <script>
-        // Функция создания ссылки
+        let autoRefreshInterval;
+        let lastVisitCount = @totalVisits;
+        
+        // Инициализация автообновления
+        document.addEventListener('DOMContentLoaded', function() {
+            startAutoRefresh();
+            document.getElementById('targetUrl').focus();
+        });
+        
+        // Автообновление
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            
+            if (document.getElementById('autoRefresh').checked) {
+                autoRefreshInterval = setInterval(refreshData, 10000); // 10 секунд
+            }
+        }
+        
+        // Переключение автообновления
+        document.getElementById('autoRefresh').addEventListener('change', startAutoRefresh);
+        
+        // Основная функция обновления данных
+        async function refreshData() {
+            try {
+                const response = await fetch('/api/tracker/visits?limit=50');
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateVisitsTable(data.visits);
+                    updateStatistics();
+                    updateLastUpdateTime();
+                    
+                    // Проверяем новые посещения
+                    const currentVisitCount = data.visits.length;
+                    if (currentVisitCount > lastVisitCount) {
+                        showNewVisitNotification(currentVisitCount - lastVisitCount);
+                        lastVisitCount = currentVisitCount;
+                    }
+                }
+            } catch (error) {
+                console.error('Ошибка обновления:', error);
+            }
+        }
+        
+        // Обновление таблицы посещений
+        function updateVisitsTable(visits) {
+            const visitsBody = document.getElementById('visits-body');
+            if (!visitsBody) return;
+            
+            visitsBody.innerHTML = '';
+            
+            visits.forEach(visit => {
+                const row = document.createElement('tr');
+                row.setAttribute('data-visit-id', visit.id);
+                row.className = 'new-visit';
+                
+                const visitedAt = new Date(visit.visitedAt);
+                const timeStr = `${visitedAt.getDate().toString().padStart(2, '0')}.${(visitedAt.getMonth() + 1).toString().padStart(2, '0')} ${visitedAt.getHours().toString().padStart(2, '0')}:${visitedAt.getMinutes().toString().padStart(2, '0')}:${visitedAt.getSeconds().toString().padStart(2, '0')}`;
+                
+                row.innerHTML = `
+                    <td>${timeStr}</td>
+                    <td><span class="ip-badge">${visit.visitorIp}</span></td>
+                    <td><span class="browser-badge">${visit.browser}</span></td>
+                    <td><span style="color: #666;">${visit.linkId}</span></td>
+                    <td><span class="browser-badge">${visit.device}</span></td>
+                `;
+                
+                visitsBody.appendChild(row);
+            });
+            
+            // Обновляем счетчик
+            const totalCountElement = document.getElementById('total-visits-count');
+            if (totalCountElement) {
+                totalCountElement.textContent = visits.length;
+            }
+        }
+        
+        // Обновление статистики
+        async function updateStatistics() {
+            try {
+                const linksResponse = await fetch('/api/tracker/links');
+                const linksData = await linksResponse.json();
+                
+                if (linksData.success) {
+                    // Обновляем счетчики переходов для каждой ссылки
+                    linksData.links.forEach(link => {
+                        const countElement = document.getElementById(`visits-count-${link.id}`);
+                        if (countElement) {
+                            countElement.innerHTML = `<strong>${link.visitsCount}</strong>`;
+                        }
+                    });
+                    
+                    // Обновляем общую статистику
+                    const totalVisits = linksData.links.reduce((sum, link) => sum + link.visitsCount, 0);
+                    document.getElementById('totalVisits').textContent = totalVisits;
+                    document.getElementById('visitsUpdate').textContent = 'только что';
+                    
+                    // Через 2 секунды убираем отметку
+                    setTimeout(() => {
+                        document.getElementById('visitsUpdate').textContent = 'обновлено';
+                    }, 2000);
+                }
+            } catch (error) {
+                console.error('Ошибка обновления статистики:', error);
+            }
+        }
+        
+        // Уведомление о новых посещениях
+        function showNewVisitNotification(count) {
+            if (count <= 0) return;
+            
+            // Создаем уведомление
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #34a853;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 1000;
+                animation: fadeIn 0.3s;
+            `;
+            notification.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-users"></i>
+                    <div>
+                        <strong>Новые переходы!</strong>
+                        <div style="font-size: 0.9rem;">+${count} новый(их) переход(ов)</div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Автоматически скрываем через 5 секунд
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transition = 'opacity 0.3s';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+            
+            // Переключаемся на вкладку посещений, если не на ней
+            const activeTab = document.querySelector('.tab-btn.active');
+            if (activeTab && activeTab.textContent !== 'История переходов') {
+                switchTab('visits');
+            }
+        }
+        
+        // Обновление времени последнего обновления
+        function updateLastUpdateTime() {
+            const now = new Date();
+            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+            document.getElementById('lastUpdateTime').textContent = timeStr;
+        }
+        
+        // Остальные функции остаются без изменений
         async function createLink() {
             const url = document.getElementById('targetUrl').value;
             const note = document.getElementById('note').value;
@@ -607,30 +837,26 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Генерируем нейтральное доменное имя
                     const domainNames = [
                         'link-service', 'redirect-pro', 'go-forward',
                         'url-short', 'click-manager', 'web-redirect'
                     ];
                     const randomDomain = domainNames[Math.floor(Math.random() * domainNames.length)];
                     
-                    // Создаем "красивую" ссылку
                     const prettyLink = `https://${randomDomain}.net/track/${result.linkId}`;
                     const trackingLink = `${window.location.origin}/track/${result.linkId}`;
                     
-                    // Показываем результат
                     document.getElementById('created-link').textContent = prettyLink;
                     document.getElementById('target-link').textContent = url;
                     document.getElementById('result').style.display = 'block';
                     
-                    // Сохраняем реальные ссылки в data-атрибуты
                     document.getElementById('created-link').dataset.realLink = trackingLink;
                     document.getElementById('target-link').dataset.realLink = url;
                     
-                    // Прокручиваем к результату
                     document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
                     
-                    // Не очищаем форму - пусть пользователь видит что ввел
+                    // Обновляем список ссылок через 1 секунду
+                    setTimeout(refreshData, 1000);
                 } else {
                     alert('Ошибка: ' + result.message);
                 }
@@ -639,25 +865,21 @@
             }
         }
         
-        // Копирование созданной ссылки
         function copyCreatedLink() {
             const realLink = document.getElementById('created-link').dataset.realLink;
             copyToClipboard(realLink);
         }
         
-        // Копирование целевой ссылки
         function copyTargetLink() {
             const targetLink = document.getElementById('target-link').dataset.realLink;
             copyToClipboard(targetLink);
         }
         
-        // Копирование ссылки по ID
         function copyLink(linkId) {
             const link = `${window.location.origin}/track/${linkId}`;
             copyToClipboard(link);
         }
         
-        // Общая функция копирования
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
                 const notice = document.getElementById('copy-notice');
@@ -668,14 +890,18 @@
             });
         }
         
-        // Удаление ссылки
         function deleteLink(linkId) {
             if (confirm('Удалить эту ссылку? Все данные о переходах будут потеряны.')) {
                 fetch(`/api/tracker/delete/${linkId}`, { method: 'DELETE' })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
-                            location.reload();
+                            // Удаляем строку из таблицы
+                            const row = document.getElementById(`link-row-${linkId}`);
+                            if (row) row.remove();
+                            
+                            // Обновляем статистику
+                            refreshData();
                         } else {
                             alert('Ошибка удаления: ' + data.message);
                         }
@@ -683,29 +909,18 @@
             }
         }
         
-        // Переключение вкладок
         function switchTab(tabName) {
-            // Скрыть все вкладки
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
             
-            // Снять активный класс с кнопок
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             
-            // Показать выбранную вкладку
             document.getElementById(tabName + '-tab').classList.add('active');
-            
-            // Активировать кнопку
             event.target.classList.add('active');
         }
-        
-        // Автоматически фокусируемся на поле URL при загрузке
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('targetUrl').focus();
-        });
     </script>
     
     <!-- Font Awesome для иконок -->
@@ -732,5 +947,14 @@
         if (userAgent.Contains("Tablet")) return "Планшет";
         return "Компьютер";
     }
+    
+    public void Dispose()
+    {
+        // Очистка ресурсов
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        await Task.CompletedTask;
+    }
 }
-EOF
