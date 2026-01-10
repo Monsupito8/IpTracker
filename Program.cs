@@ -3,35 +3,44 @@ using IpTracker.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Добавляем поддержку контроллеров
+// 1. Добавляем поддержку контроллеров
 builder.Services.AddControllers();
 
-// ТОЛЬКО SQLite - убрал весь PostgreSQL код
+// 2. ДОБАВЬ ЭТУ СТРОКУ для Razor Pages
+builder.Services.AddRazorPages();
+
+// 3. Настройка базы данных
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlite("Data Source=iptracker.db"));
 
-// Настраиваем порт
+// 4. Настраиваем порт
 var appPort = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{appPort}");
 
 var app = builder.Build();
 
-// Создаем базу данных
+// 5. Создаем базу данных
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.EnsureCreated();
 }
 
+// 6. ДОБАВЬ ЭТУ СТРОКУ для Razor Pages
+app.MapRazorPages();
+
+// 7. API маршруты
 app.MapControllers();
 
-// Главная страница
+// 8. Главная страница (если нет Index.cshtml)
 app.MapGet("/", () => @"<!DOCTYPE html>
 <html>
-<head><title>IP Tracker</title></head>
+<head>
+    <meta http-equiv='refresh' content='0; url=/Index'>
+    <title>IP Tracker</title>
+</head>
 <body>
-<h1>✅ IP Tracker работает!</h1>
-<p>API доступно по адресу: /api/tracker/generate</p>
+    <p>Перенаправление на главную страницу...</p>
 </body>
 </html>");
 
