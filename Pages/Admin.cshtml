@@ -1,0 +1,337 @@
+@page "/admin/{id}"
+@using Microsoft.EntityFrameworkCore
+@inject IpTracker.Data.ApplicationDbContext DbContext
+
+@{
+    ViewData["Title"] = "Статистика ссылки";
+    
+    // Получаем ID ссылки из URL
+    var linkId = RouteData.Values["id"]?.ToString();
+    
+    // Загружаем ссылку и все посещения
+    var link = await DbContext.TrackingLinks
+        .Include(l => l.Visits)
+        .FirstOrDefaultAsync(l => l.Id == linkId);
+    
+    // Если ссылка не найдена
+    if (link == null)
+    {
+        <div class="container mt-5">
+            <div class="alert alert-danger">
+                <h4>❌ Ссылка не найдена</h4>
+                <p>Ссылка с ID <strong>@linkId</strong> не существует.</p>
+                <a href="/" class="btn btn-primary">На главную</a>
+            </div>
+        </div>
+        return;
+    }
+    
+    // Сортируем посещения по дате
+    var visits = link.Visits.OrderByDescending(v => v.VisitedAt).ToList();
+}
+
+<div class="container mt-4">
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">📊 Статистика ссылки: @link.Id</h4>
+        </div>
+        
+        <div class="card-body">
+            <!-- Информация о ссылке -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <h5>Информация о ссылке:</h5>
+                    <table class="table table-sm">
+                        <tr><th>ID:</th><td><code>@link.Id</code></td></tr>
+                        <tr><th>Создана:</th><td>@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</td></tr>
+                        <tr><th>Примечание:</th><td>@(string.IsNullOrEmpty(link.Note) ? "—" : link.Note)</td></tr>
+                        <tr><th>Целевой URL:</th><td><a href="@link.TargetUrl" target="_blank">@link.TargetUrl</a></td></tr>
+                    </table>
+                </div>
+                
+                <div class="col-md-6">
+                    <h5>Действия:</h5>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-success btn-lg" onclick="testCurrentLink()">
+                            🔄 Протестировать ссылку
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="location.reload()">
+                            📊 Обновить статистику
+                        </button>
+                        <a href="/" class="btn btn-outline-primary">🏠 На главную</a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Статистика -->
+            <div class="row mb-4 text-center">
+                <div class="col-md-3">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h2>@visits.Count</h2>
+                            <p class="mb-0">Всего переходов</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h2>@visits.GroupBy(v => v.VisitorIp).Count()</h2>
+                            <p class="mb-0">Уникальных IP</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            @{
+                                var today = visits.Count(v => v.VisitedAt.Date == DateTime.UtcNow.Date);
+                            }
+                            <h2>@today</h2>
+                            <p class="mb-0">Сегодня</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            @{
+                                var lastVisit = visits.FirstOrDefault()?.VisitedAt;
+                            }
+                            <h2>@(lastVisit?.ToString("HH:mm") ?? "—")</h2>
+                            <p class="mb-0">Последний</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Таблица переходов -->
+            <h5>История переходов (@visits.Count):</h5>
+            
+            @if (visits.Count == 0)
+            {
+                <div class="alert alert-warning">
+                    <p>Пока никто не перешел по этой ссылке.</p>
+                    <p>Поделитесь ссылкой или протестируйте её сами.</p>
+                    <button class="btn btn-success" onclick="testCurrentLink()">
+                        🔄 Протестировать сейчас
+                    </button>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Время</th>
+                                <th>IP-адрес</th>
+                                <th>Браузер</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < visits.Count; i++)
+                            {
+                                var visit = visits[i];
+                                <tr>
+                                    <td>@(i + 1)</td>
+                                    <td>@visit.VisitedAt.ToString("dd.MM.yyyy HH:mm:ss")</td>
+                                    <td>
+                                        <code>@visit.VisitorIp</code><br>
+                                        <small>@GetIpType(visit.VisitorIp)</small>
+                                    </td>
+                                    <td>
+                                        <small>@GetBrowserShort(visit.UserAgent)</small>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-info" 
+                                                onclick="showDetails('@visit.VisitorIp', '@System.Net.WebUtility.HtmlEncode(visit.UserAgent)')">
+                                            ℹ️ Подробнее
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            
+            <!-- Блок с деталями -->
+            <div id="details" class="card mt-4" style="display: none;">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Детальная информация</h5>
+                </div>
+                <div class="card-body" id="detailsContent">
+                    Загрузка...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@functions {
+    string GetBrowserShort(string userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
+        
+        if (userAgent.Contains("Chrome")) return "Chrome";
+        if (userAgent.Contains("Firefox")) return "Firefox";
+        if (userAgent.Contains("Safari")) return "Safari";
+        if (userAgent.Contains("Edge")) return "Edge";
+        if (userAgent.Contains("Opera")) return "Opera";
+        
+        return "Другой";
+    }
+    
+    string GetIpType(string ip)
+    {
+        if (string.IsNullOrEmpty(ip)) return "";
+        
+        if (ip == "127.0.0.1" || ip == "::1") 
+            return "Локальный";
+        if (ip.StartsWith("192.168.") || ip.StartsWith("10.")) 
+            return "Лок. сеть";
+        
+        return "Публичный";
+    }
+}
+
+@section Scripts {
+    <script>
+        // Получаем ID из URL
+        function getLinkId() {
+            const path = window.location.pathname.split('/');
+            return path[2];
+        }
+        
+        // Тестирование ссылки
+        function testCurrentLink() {
+            const linkId = getLinkId();
+            if (!linkId) {
+                alert('❌ Ошибка: не найден ID ссылки');
+                return;
+            }
+            
+            const testUrl = `${window.location.origin}/track/${linkId}`;
+            window.open(testUrl, '_blank');
+            
+            alert('✅ Ссылка открыта в новой вкладке!\n\nСтраница обновится через 3 секунды...');
+            
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
+        }
+        
+        // Показать детали
+        function showDetails(ip, userAgent) {
+            const details = document.getElementById('details');
+            const content = document.getElementById('detailsContent');
+            
+            // Декодируем User-Agent
+            const decodedUA = decodeHtml(userAgent);
+            
+            // Определяем информацию
+            const browserInfo = getBrowserInfo(decodedUA);
+            const ipType = getIpTypeInfo(ip);
+            
+            content.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>🌐 Сетевые данные:</h6>
+                        <table class="table table-sm">
+                            <tr><th>IP адрес:</th><td><code>${ip}</code></td></tr>
+                            <tr><th>Тип:</th><td>${ipType}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>💻 Система:</h6>
+                        <table class="table table-sm">
+                            <tr><th>Браузер:</th><td>${browserInfo.browser}</td></tr>
+                            <tr><th>ОС:</th><td>${browserInfo.os}</td></tr>
+                            <tr><th>Устройство:</th><td>${browserInfo.device}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-sm btn-secondary" 
+                            onclick="document.getElementById('details').style.display='none'">
+                        ✕ Закрыть
+                    </button>
+                </div>
+            `;
+            
+            details.style.display = 'block';
+            details.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // Вспомогательные функции
+        function decodeHtml(text) {
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = text;
+            return textarea.value;
+        }
+        
+        function getBrowserInfo(userAgent) {
+            if (!userAgent) return { browser: 'Неизвестно', os: 'Неизвестно', device: 'Неизвестно' };
+            
+            let browser = 'Неизвестно';
+            let os = 'Неизвестно';
+            let device = 'Компьютер';
+            
+            // Браузер
+            if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) browser = 'Chrome';
+            else if (userAgent.includes('Firefox')) browser = 'Firefox';
+            else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browser = 'Safari';
+            else if (userAgent.includes('Edg')) browser = 'Edge';
+            else if (userAgent.includes('Opera')) browser = 'Opera';
+            
+            // ОС
+            if (userAgent.includes('Windows')) os = 'Windows';
+            else if (userAgent.includes('Mac')) os = 'macOS';
+            else if (userAgent.includes('Linux')) os = 'Linux';
+            else if (userAgent.includes('Android')) os = 'Android';
+            else if (userAgent.includes('iPhone') || userAgent.includes('iPad')) os = 'iOS';
+            
+            // Устройство
+            if (userAgent.includes('Mobile') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
+                device = '📱 Мобильное';
+            }
+            
+            return { browser, os, device };
+        }
+        
+        function getIpTypeInfo(ip) {
+            if (!ip) return 'Неизвестно';
+            
+            if (ip === '127.0.0.1' || ip === '::1') return 'Локальный компьютер (вы)';
+            if (ip.startsWith('192.168.')) return 'Локальная сеть (роутер)';
+            if (ip.startsWith('10.')) return 'Локальная сеть';
+            
+            return 'Публичный IP интернета';
+        }
+    </script>
+    
+    <style>
+        .card {
+            border-radius: 10px;
+        }
+        .card-header {
+            border-bottom: none;
+        }
+        code {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #d63384;
+        }
+        .table th {
+            background-color: #f8f9fa;
+        }
+        .btn-success {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            border: none;
+        }
+    </style>
+}

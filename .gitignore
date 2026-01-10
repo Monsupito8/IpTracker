@@ -1,0 +1,24 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+
+# Базы данных
+*.db
+*.sqlite
+*.mdf
+
+# Настройки IDE
+.vs/
+.vscode/
+.idea/
+
+# Логи
+*.log
+*.tmp
+
+# Пользовательские файлы
+appsettings.Development.json
+appsettings.Secrets.json
