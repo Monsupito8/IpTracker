@@ -15,7 +15,7 @@ namespace IpTracker.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<TrackerController> _logger;
-        private static string? _realPublicIp; // Кэшируем публичный IP
+        private static string? _realPublicIp;
 
         public TrackerController(ApplicationDbContext context, ILogger<TrackerController> logger)
         {
@@ -24,31 +24,29 @@ namespace IpTracker.Controllers
         }
 
         // Генерация новой отслеживаемой ссылки
+        // Генерация новой отслеживаемой ссылки
         [HttpPost("generate")]
         public async Task<IActionResult> GenerateLink([FromBody] GenerateRequest request)
         {
             try
             {
-                // Валидация URL
                 if (string.IsNullOrEmpty(request?.TargetUrl))
                 {
                     return BadRequest(new { success = false, message = "URL не может быть пустым" });
                 }
 
-                // Добавляем https:// если нет протокола
                 if (!request.TargetUrl.StartsWith("http://") && !request.TargetUrl.StartsWith("https://"))
                 {
                     request.TargetUrl = "https://" + request.TargetUrl;
                 }
 
-                // Создаем уникальный ID для ссылки
                 var linkId = Guid.NewGuid().ToString("N").Substring(0, 8);
 
                 var trackingLink = new TrackingLink
                 {
                     Id = linkId,
                     CreatedAt = DateTime.UtcNow,
-                    CreatorIp = await GetRealIpAsync(true), // Получаем реальный IP создателя
+                    CreatorIp = await GetRealIpAsync(true),
                     Note = request.Note?.Trim(),
                     TargetUrl = request.TargetUrl.Trim()
                 };
@@ -56,9 +54,8 @@ namespace IpTracker.Controllers
                 _context.TrackingLinks.Add(trackingLink);
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation($"Создана новая ссылка: {linkId}");
+                _logger.LogInformation($"Создана ссылка: {linkId}");
 
-                // Формируем URL для отслеживания
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
                 return Ok(new
@@ -66,6 +63,7 @@ namespace IpTracker.Controllers
                     success = true,
                     trackingUrl = $"{baseUrl}/track/{linkId}",
                     adminUrl = $"{baseUrl}/admin/{linkId}",
+                    targetUrl = trackingLink.TargetUrl,  // ← ДОБАВЬ ЭТУ СТРОКУ!
                     linkId = linkId,
                     createdAt = trackingLink.CreatedAt,
                     message = "Ссылка успешно создана"
@@ -87,20 +85,15 @@ namespace IpTracker.Controllers
                 var link = await _context.TrackingLinks.FindAsync(id);
                 if (link == null)
                 {
-                    return NotFound(new { 
-                        success = false, 
-                        message = "Ссылка не найдена"
-                    });
+                    return NotFound(new { success = false, message = "Ссылка не найдена" });
                 }
 
-                // Получаем РЕАЛЬНЫЙ IP посетителя
                 var clientIp = await GetRealIpAsync();
                 var userAgent = Request.Headers["User-Agent"].ToString();
                 var referer = Request.Headers["Referer"].ToString();
 
                 _logger.LogInformation($"Переход по ссылке {id} с IP: {clientIp}");
 
-                // Сохраняем информацию о посещении
                 var visit = new LinkVisit
                 {
                     LinkId = id,
@@ -113,7 +106,6 @@ namespace IpTracker.Controllers
                 _context.LinkVisits.Add(visit);
                 await _context.SaveChangesAsync();
 
-                // Перенаправляем на целевую страницу
                 return Redirect(link.TargetUrl ?? "https://google.com");
             }
             catch (Exception ex)
@@ -123,6 +115,7 @@ namespace IpTracker.Controllers
             }
         }
 
+        // Просмотр статистики в JSON формате
         // Просмотр статистики в JSON формате
         [HttpGet("stats/{id}")]
         public async Task<IActionResult> GetStats(string id)
@@ -138,7 +131,6 @@ namespace IpTracker.Controllers
                     return NotFound(new { success = false, message = "Ссылка не найдена" });
                 }
 
-                // Группируем по IP для уникальных посещений
                 var uniqueVisitors = link.Visits
                     .GroupBy(v => v.VisitorIp)
                     .Select(g => new
@@ -159,7 +151,8 @@ namespace IpTracker.Controllers
                         createdAt = link.CreatedAt,
                         creatorIp = link.CreatorIp,
                         note = link.Note,
-                        targetUrl = link.TargetUrl
+                        targetUrl = link.TargetUrl,  // ← УЖЕ ЕСТЬ
+                        trackingUrl = $"{Request.Scheme}://{Request.Host}/track/{link.Id}"  // ← ДОБАВЬ
                     },
                     statistics = new
                     {
@@ -175,6 +168,9 @@ namespace IpTracker.Controllers
                             id = v.Id,
                             visitorIp = v.VisitorIp,
                             userAgent = v.UserAgent,
+                            browser = GetBrowserName(v.UserAgent),
+                            os = GetOSName(v.UserAgent),
+                            device = GetDeviceType(v.UserAgent),
                             referer = v.Referer,
                             visitedAt = v.VisitedAt,
                             ipType = GetIpType(v.VisitorIp)
@@ -189,35 +185,275 @@ namespace IpTracker.Controllers
             }
         }
 
-        // Получение РЕАЛЬНОГО IP адреса
+        // Получение информации о конкретном посещении (для админки)
+        [HttpGet("visit/{id}")]
+        public async Task<IActionResult> GetVisit(int id)
+        {
+            try
+            {
+                var visit = await _context.LinkVisits
+                    .Include(v => v.Link)
+                    .FirstOrDefaultAsync(v => v.Id == id);
+
+                if (visit == null)
+                {
+                    return NotFound(new { success = false, message = "Посещение не найдено" });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    id = visit.Id,
+                    visitorIp = visit.VisitorIp,
+                    userAgent = visit.UserAgent,
+                    browserName = GetBrowserName(visit.UserAgent),
+                    osName = GetOSName(visit.UserAgent),
+                    deviceType = GetDeviceType(visit.UserAgent),
+                    referer = visit.Referer,
+                    visitedAt = visit.VisitedAt,
+                    linkId = visit.LinkId,
+                    linkNote = visit.Link?.Note
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при получении посещения {id}");
+                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
+            }
+        }
+
+        // Удаление посещения
+        [HttpDelete("visit/{id}")]
+        public async Task<IActionResult> DeleteVisit(int id)
+        {
+            try
+            {
+                var visit = await _context.LinkVisits.FindAsync(id);
+                if (visit == null)
+                {
+                    return NotFound(new { success = false, message = "Посещение не найдено" });
+                }
+
+                _context.LinkVisits.Remove(visit);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Удалено посещение ID: {id}");
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Посещение удалено"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при удалении посещения {id}");
+                return StatusCode(500, new { success = false, message = "Ошибка при удалении" });
+            }
+        }
+
+        // Получение всех ссылок
+        [HttpGet("links")]
+        public async Task<IActionResult> GetAllLinks()
+        {
+            try
+            {
+                var links = await _context.TrackingLinks
+                    .Include(l => l.Visits)
+                    .OrderByDescending(l => l.CreatedAt)
+                    .Select(l => new
+                    {
+                        id = l.Id,
+                        createdAt = l.CreatedAt,
+                        creatorIp = l.CreatorIp,
+                        note = l.Note,
+                        targetUrl = l.TargetUrl,
+                        visitsCount = l.Visits.Count,
+                        uniqueVisitors = l.Visits.GroupBy(v => v.VisitorIp).Count(),
+                        lastVisit = l.Visits.Max(v => (DateTime?)v.VisitedAt)
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    links = links,
+                    total = links.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при получении списка ссылок");
+                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
+            }
+        }
+
+        // Получение всех посещений
+        [HttpGet("visits")]
+        public async Task<IActionResult> GetAllVisits([FromQuery] int limit = 500)
+        {
+            try
+            {
+                var visits = await _context.LinkVisits
+                    .Include(v => v.Link)
+                    .OrderByDescending(v => v.VisitedAt)
+                    .Take(limit)
+                    .Select(v => new
+                    {
+                        id = v.Id,
+                        linkId = v.LinkId,
+                        visitorIp = v.VisitorIp,
+                        userAgent = v.UserAgent,
+                        browser = GetBrowserName(v.UserAgent),
+                        os = GetOSName(v.UserAgent),
+                        device = GetDeviceType(v.UserAgent),
+                        referer = v.Referer,
+                        visitedAt = v.VisitedAt,
+                        linkNote = v.Link != null ? v.Link.Note : null
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    visits = visits,
+                    total = visits.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ошибка при получении списка посещений");
+                return StatusCode(500, new { success = false, message = "Ошибка сервера" });
+            }
+        }
+
+        // Получение информации о IP
+        [HttpGet("ipinfo/{ip}")]
+        public async Task<IActionResult> GetIpInfo(string ip)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(ip) || ip == "Unknown" || ip == "::1" || ip == "127.0.0.1")
+                {
+                    return Ok(new
+                    {
+                        success = true,
+                        ip = ip,
+                        type = "Локальный IP",
+                        message = "Это локальный IP адрес (ваш компьютер или сервер)"
+                    });
+                }
+
+                using var httpClient = new HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(3);
+
+                try
+                {
+                    var response = await httpClient.GetAsync($"http://ipwho.is/{ip}");
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        var json = System.Text.Json.JsonDocument.Parse(content);
+
+                        return Ok(new
+                        {
+                            success = true,
+                            ip = ip,
+                            country = json.RootElement.GetProperty("country").GetString(),
+                            region = json.RootElement.GetProperty("region").GetString(),
+                            city = json.RootElement.GetProperty("city").GetString(),
+                            isp = json.RootElement.GetProperty("connection").GetProperty("isp").GetString(),
+                            org = json.RootElement.GetProperty("connection").GetProperty("org").GetString(),
+                            latitude = json.RootElement.GetProperty("latitude").GetDouble(),
+                            longitude = json.RootElement.GetProperty("longitude").GetDouble(),
+                            timezone = json.RootElement.GetProperty("timezone").GetProperty("id").GetString(),
+                            source = "ipwho.is"
+                        });
+                    }
+                }
+                catch { }
+
+                return Ok(new
+                {
+                    success = true,
+                    ip = ip,
+                    message = "Информация об IP ограничена",
+                    type = GetIpType(ip)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при получении информации об IP {ip}");
+                return Ok(new
+                {
+                    success = true,
+                    ip = ip,
+                    message = "Ошибка при получении информации"
+                });
+            }
+        }
+
+        // Удаление ссылки и всех данных
+        [HttpDelete("delete/{id}")]
+        public async Task<IActionResult> DeleteLink(string id)
+        {
+            try
+            {
+                var link = await _context.TrackingLinks
+                    .Include(l => l.Visits)
+                    .FirstOrDefaultAsync(l => l.Id == id);
+
+                if (link == null)
+                {
+                    return NotFound(new { success = false, message = "Ссылка не найдена" });
+                }
+
+                int visitsCount = link.Visits.Count;
+
+                _context.LinkVisits.RemoveRange(link.Visits);
+                _context.TrackingLinks.Remove(link);
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation($"Удалена ссылка {id} с {visitsCount} посещениями");
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Ссылка удалена. Удалено {visitsCount} посещений.",
+                    deletedVisits = visitsCount
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Ошибка при удалении ссылки {id}");
+                return StatusCode(500, new { success = false, message = "Ошибка при удалении" });
+            }
+        }
+
+        // ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
+
         private async Task<string> GetRealIpAsync(bool forceUpdate = false)
         {
             try
             {
-                // 1. Пробуем получить IP из заголовков (для прокси/балансировщиков)
                 var ip = Request.Headers["X-Forwarded-For"].FirstOrDefault();
 
                 if (!string.IsNullOrEmpty(ip))
                 {
-                    // Может быть несколько IP через запятую, берем первый
                     var ips = ip.Split(',');
                     return ips[0].Trim();
                 }
 
-                // 2. Другие возможные заголовки
                 ip = Request.Headers["X-Real-IP"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(ip)) return ip;
 
-                // 3. Стандартный способ
                 ip = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-                // 4. Обработка IPv6 localhost
                 if (ip == "::1") ip = "127.0.0.1";
 
-                // 5. Если это localhost - пытаемся определить публичный IP
                 if (ip == "127.0.0.1" || string.IsNullOrEmpty(ip))
                 {
-                    // Кэшируем публичный IP чтобы не делать запрос каждый раз
                     if (_realPublicIp == null || forceUpdate)
                     {
                         try
@@ -225,7 +461,6 @@ namespace IpTracker.Controllers
                             using var httpClient = new HttpClient();
                             httpClient.Timeout = TimeSpan.FromSeconds(3);
 
-                            // Пробуем несколько сервисов
                             var services = new[]
                             {
                                 "https://api.ipify.org",
@@ -260,14 +495,12 @@ namespace IpTracker.Controllers
                         }
                     }
 
-                    // Если это localhost, но есть публичный IP - показываем его
                     if (ip == "127.0.0.1" && _realPublicIp != "Не удалось определить" && _realPublicIp != "Ошибка определения")
                     {
                         return _realPublicIp + " (ваш публичный IP)";
                     }
                 }
 
-                // 6. Очищаем от порта если есть
                 if (ip != null && ip.Contains(":"))
                 {
                     ip = ip.Split(':')[0];
@@ -282,7 +515,6 @@ namespace IpTracker.Controllers
             }
         }
 
-        // Определение типа IP
         private string GetIpType(string ip)
         {
             if (string.IsNullOrEmpty(ip)) return "Неизвестно";
@@ -290,7 +522,7 @@ namespace IpTracker.Controllers
             if (ip == "127.0.0.1" || ip.Contains("ваш публичный IP"))
                 return "Локальный/Ваш";
 
-            if (ip.StartsWith("192.168.") || ip.StartsWith("10.") || 
+            if (ip.StartsWith("192.168.") || ip.StartsWith("10.") ||
                 (ip.StartsWith("172.") && int.TryParse(ip.Split('.')[1], out var second) && second >= 16 && second <= 31))
                 return "Локальная сеть";
 
@@ -300,92 +532,31 @@ namespace IpTracker.Controllers
             return "Публичный IP";
         }
 
-        // Удаление ссылки и всех данных
-        [HttpDelete("delete/{id}")]
-        public async Task<IActionResult> DeleteLink(string id)
+        private string GetBrowserName(string userAgent)
         {
-            try
-            {
-                var link = await _context.TrackingLinks
-                    .Include(l => l.Visits)
-                    .FirstOrDefaultAsync(l => l.Id == id);
-
-                if (link == null)
-                {
-                    return NotFound(new { success = false, message = "Ссылка не найдена" });
-                }
-
-                int visitsCount = link.Visits.Count;
-
-                // Удаляем все посещения
-                _context.LinkVisits.RemoveRange(link.Visits);
-                // Удаляем саму ссылку
-                _context.TrackingLinks.Remove(link);
-
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation($"Удалена ссылка {id} с {visitsCount} посещениями");
-
-                return Ok(new 
-                { 
-                    success = true, 
-                    message = $"Ссылка удалена. Удалено {visitsCount} посещений.",
-                    deletedVisits = visitsCount
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Ошибка при удалении ссылки {id}");
-                return StatusCode(500, new { success = false, message = "Ошибка при удалении" });
-            }
+            if (userAgent.Contains("Chrome")) return "Chrome";
+            if (userAgent.Contains("Firefox")) return "Firefox";
+            if (userAgent.Contains("Safari") && !userAgent.Contains("Chrome")) return "Safari";
+            if (userAgent.Contains("Edge")) return "Edge";
+            if (userAgent.Contains("Opera")) return "Opera";
+            return "Other";
         }
 
-        // Экспорт данных в CSV
-        [HttpGet("export/{id}/csv")]
-        public async Task<IActionResult> ExportToCsv(string id)
+        private string GetOSName(string userAgent)
         {
-            try
-            {
-                var visits = await _context.LinkVisits
-                    .Where(v => v.LinkId == id)
-                    .OrderByDescending(v => v.VisitedAt)
-                    .ToListAsync();
+            if (userAgent.Contains("Windows")) return "Windows";
+            if (userAgent.Contains("Mac OS")) return "macOS";
+            if (userAgent.Contains("Linux")) return "Linux";
+            if (userAgent.Contains("Android")) return "Android";
+            if (userAgent.Contains("iOS") || userAgent.Contains("iPhone")) return "iOS";
+            return "Unknown OS";
+        }
 
-                if (visits.Count == 0)
-                {
-                    return NotFound(new { success = false, message = "Нет данных для экспорта" });
-                }
-
-                // Создаем CSV
-                var csv = "IP Address;Время (UTC);Браузер;Откуда пришел\n";
-
-                foreach (var visit in visits)
-                {
-                    var safeUserAgent = (visit.UserAgent ?? "")
-                        .Replace("\"", "'")
-                        .Replace(";", ",");
-
-                    var safeReferer = (visit.Referer ?? "")
-                        .Replace("\"", "'")
-                        .Replace(";", ",");
-
-                    csv += $"\"{visit.VisitorIp}\";"
-                         + $"\"{visit.VisitedAt:yyyy-MM-dd HH:mm:ss}\";"
-                         + $"\"{safeUserAgent}\";"
-                         + $"\"{safeReferer}\"\n";
-                }
-
-                var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
-
-                return File(bytes,
-                    "text/csv",
-                    $"visits_{id}_{DateTime.UtcNow:yyyyMMdd}.csv");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Ошибка при экспорте CSV для ссылки {id}");
-                return StatusCode(500, new { success = false, message = "Ошибка при экспорте" });
-            }
+        private string GetDeviceType(string userAgent)
+        {
+            if (userAgent.Contains("Mobile")) return "Mobile";
+            if (userAgent.Contains("Tablet")) return "Tablet";
+            return "Desktop";
         }
     }
 

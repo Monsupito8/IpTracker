@@ -1,0 +1,1119 @@
+@page "/admin"
+@using IpTracker.Data
+@using Microsoft.EntityFrameworkCore
+@inject ApplicationDbContext DbContext
+
+@{
+    var allLinks = await DbContext.TrackingLinks
+        .Include(l => l.Visits)
+        .OrderByDescending(l => l.CreatedAt)
+        .ToListAsync();
+    
+    var allVisits = await DbContext.LinkVisits
+        .Include(v => v.Link)
+        .OrderByDescending(v => v.VisitedAt)
+        .Take(500)
+        .ToListAsync();
+    
+    var totalVisits = allLinks.Sum(l => l.Visits.Count);
+    var uniqueIPs = allVisits.Select(v => v.VisitorIp).Distinct().Count();
+    var todayVisits = allVisits.Count(v => v.VisitedAt.Date == DateTime.UtcNow.Date);
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>👑 Админ-панель IP Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-dark: #4338ca;
+            --secondary: #64748b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --gray: #94a3b8;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: var(--dark);
+            min-height: 100vh;
+        }
+        
+        .admin-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .admin-header {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            border-left: 6px solid var(--primary);
+        }
+        
+        .admin-header h1 {
+            color: var(--primary);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .admin-header h1 i {
+            background: var(--primary);
+            color: white;
+            padding: 15px;
+            border-radius: 15px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            transition: transform 0.3s;
+            border-top: 4px solid var(--primary);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-card.total { border-top-color: var(--primary); }
+        .stat-card.unique { border-top-color: var(--success); }
+        .stat-card.today { border-top-color: var(--warning); }
+        .stat-card.links { border-top-color: var(--danger); }
+        
+        .stat-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+        
+        .stat-number {
+            font-size: 3rem;
+            font-weight: bold;
+            color: var(--dark);
+            line-height: 1;
+        }
+        
+        .stat-label {
+            color: var(--secondary);
+            font-size: 1rem;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .create-section {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .create-section h2 {
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        
+        .create-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        label {
+            font-weight: 600;
+            color: var(--secondary);
+        }
+        
+        input, textarea {
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 20px rgba(79, 70, 229, 0.3);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+        }
+        
+        #create-result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            background: #d1fae5;
+            display: none;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            background: white;
+            padding: 10px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+        
+        .tab-btn {
+            padding: 12px 30px;
+            border: none;
+            background: var(--light);
+            color: var(--secondary);
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .tab-btn.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .tab-btn:hover:not(.active) {
+            background: #e2e8f0;
+        }
+        
+        .tab-content {
+            display: none;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1000px;
+        }
+        
+        thead {
+            background: var(--primary);
+            color: white;
+        }
+        
+        th {
+            padding: 18px 15px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid var(--primary-dark);
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        tbody tr:hover {
+            background: #f8fafc;
+        }
+        
+        .ip-cell {
+            font-family: monospace;
+            background: #e0e7ff;
+            color: var(--primary);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .badge.chrome { background: #FFE8E8; color: #EA4335; }
+        .badge.firefox { background: #FFEFD9; color: #FF9500; }
+        .badge.safari { background: #E3F2FD; color: #4285F4; }
+        .badge.edge { background: #E8F5E9; color: #0F9D58; }
+        .badge.other { background: #F3E5F5; color: #9C27B0; }
+        
+        .device-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            background: #f1f5f9;
+            color: var(--secondary);
+        }
+        
+        .actions-cell {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            text-decoration: none;
+        }
+        
+        .action-btn.details {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .action-btn.delete {
+            background: #fee2e2;
+            color: var(--danger);
+        }
+        
+        .action-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .filter-bar {
+            background: var(--light);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .filter-input {
+            padding: 10px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .filter-btn {
+            padding: 10px 25px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: modalSlide 0.3s;
+        }
+        
+        @keyframes modalSlide {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .modal-header h2 {
+            color: var(--primary);
+        }
+        
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--secondary);
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .info-item {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        .info-label {
+            font-size: 0.9rem;
+            color: var(--secondary);
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--dark);
+            word-break: break-all;
+        }
+        
+        .user-agent-details {
+            background: #f1f5f9;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 0.9rem;
+        }
+        
+        .no-data {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--gray);
+        }
+        
+        .no-data i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        @@media (max-width: 768px) {
+            .admin-container { padding: 10px; }
+            .stats-grid { grid-template-columns: 1fr; }
+            .admin-header h1 { font-size: 2rem; }
+            .tabs { flex-direction: column; }
+            .tab-btn { justify-content: center; }
+            .filter-bar { flex-direction: column; }
+            .filter-input { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1><i class="fas fa-shield-alt"></i> Админ-панель IP Tracker</h1>
+            <p style="color: var(--secondary);">Полная статистика и управление отслеживаемыми ссылками</p>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
+                <div class="stat-number">@totalVisits</div>
+                <div class="stat-label">Всего переходов</div>
+            </div>
+            <div class="stat-card unique">
+                <div class="stat-icon"><i class="fas fa-users"></i></div>
+                <div class="stat-number">@uniqueIPs</div>
+                <div class="stat-label">Уникальных IP</div>
+            </div>
+            <div class="stat-card today">
+                <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
+                <div class="stat-number">@todayVisits</div>
+                <div class="stat-label">Переходов сегодня</div>
+            </div>
+            <div class="stat-card links">
+                <div class="stat-icon"><i class="fas fa-link"></i></div>
+                <div class="stat-number">@allLinks.Count</div>
+                <div class="stat-label">Активных ссылок</div>
+            </div>
+        </div>
+        
+        <div class="create-section">
+            <h2><i class="fas fa-plus-circle"></i> Создать новую ссылку</h2>
+            <div class="create-form">
+                <div class="form-group">
+                    <label for="targetUrl">Целевой URL:</label>
+                    <input type="url" id="targetUrl" placeholder="https://example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="note">Примечание (необязательно):</label>
+                    <input type="text" id="note" placeholder="Описание ссылки">
+                </div>
+                <button class="btn btn-success" onclick="createLink()">
+                    <i class="fas fa-rocket"></i> Создать ссылку
+                </button>
+            </div>
+            <div id="create-result"></div>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('visits')">
+                <i class="fas fa-eye"></i> Посещения
+            </button>
+            <button class="tab-btn" onclick="switchTab('links')">
+                <i class="fas fa-link"></i> Ссылки
+            </button>
+            <button class="tab-btn" onclick="switchTab('analysis')">
+                <i class="fas fa-chart-pie"></i> Аналитика
+            </button>
+        </div>
+        
+        <!-- Вкладка посещений -->
+        <div id="visits-tab" class="tab-content active">
+            <div class="filter-bar">
+                <input type="text" id="searchIp" class="filter-input" placeholder="🔍 Поиск по IP...">
+                <input type="text" id="searchBrowser" class="filter-input" placeholder="🌐 Фильтр по браузеру...">
+                <input type="date" id="searchDate" class="filter-input">
+                <button class="filter-btn" onclick="applyFilters()">
+                    <i class="fas fa-filter"></i> Применить фильтры
+                </button>
+                <button class="filter-btn" onclick="resetFilters()" style="background: var(--secondary);">
+                    <i class="fas fa-redo"></i> Сбросить
+                </button>
+            </div>
+            
+            <div class="table-container">
+                @if (allVisits.Any())
+                {
+                    <table id="visits-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Время</th>
+                                <th>IP адрес</th>
+                                <th>Браузер / ОС</th>
+                                <th>Устройство</th>
+                                <th>Ссылка</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var visit in allVisits)
+                            {
+                                <tr>
+                                    <td>@visit.Id</td>
+                                    <td>@visit.VisitedAt.ToString("dd.MM.yyyy HH:mm:ss")</td>
+                                    <td><span class="ip-cell">@visit.VisitorIp</span></td>
+                                    <td>
+                                        <span class="badge @GetBrowserClass(visit.UserAgent)">
+                                            @GetBrowserName(visit.UserAgent)
+                                        </span>
+                                        <br>
+                                        <small>@GetOSName(visit.UserAgent)</small>
+                                    </td>
+                                    <td>
+                                        <span class="device-badge">
+                                            @GetDeviceType(visit.UserAgent)
+                                        </span>
+                                    </td>
+                                    <td>
+                                        @if (visit.Link != null)
+                                        {
+                                            <a href="/stats/@visit.Link.Id" style="color: var(--primary); text-decoration: none;">
+                                                @visit.Link.Id
+                                            </a>
+                                            <br>
+                                            <small>@(visit.Link.Note ?? "Без названия")</small>
+                                        }
+                                    </td>
+                                    <td class="actions-cell">
+                                        <button class="action-btn details" onclick="showDetails(@visit.Id)">
+                                            <i class="fas fa-info-circle"></i> Подробнее
+                                        </button>
+                                        <button class="action-btn delete" onclick="deleteVisit(@visit.Id)">
+                                            <i class="fas fa-trash"></i> Удалить
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <div class="no-data">
+                        <i class="fas fa-database"></i>
+                        <h3>Нет данных о посещениях</h3>
+                        <p>Пока никто не перешел по вашим ссылкам</p>
+                    </div>
+                }
+            </div>
+        </div>
+        
+        <!-- Вкладка ссылок -->
+        <div id="links-tab" class="tab-content">
+            <div class="table-container">
+                @if (allLinks.Any())
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID ссылки</th>
+                                <th>Создана</th>
+                                <th>Целевой URL</th>
+                                <th>Переходов</th>
+                                <th>Уникальных</th>
+                                <th>Последний визит</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var link in allLinks)
+                            {
+                                var uniqueCount = link.Visits.GroupBy(v => v.VisitorIp).Count();
+                                var lastVisit = link.Visits.OrderByDescending(v => v.VisitedAt).FirstOrDefault();
+                                
+                                <tr>
+                                    <td><strong>@link.Id</strong></td>
+                                    <td>@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        <a href="@link.TargetUrl" target="_blank" style="color: var(--primary);">
+                                            @(link.TargetUrl.Length > 40 ? link.TargetUrl.Substring(0, 40) + "..." : link.TargetUrl)
+                                        </a>
+                                    </td>
+                                    <td><span class="stat-number">@link.Visits.Count</span></td>
+                                    <td><span class="stat-number">@uniqueCount</span></td>
+                                    <td>
+                                        @if (lastVisit != null)
+                                        {
+                                            @lastVisit.VisitedAt.ToString("dd.MM.yyyy HH:mm")
+                                        }
+                                        else
+                                        {
+                                            <span style="color: var(--gray);">—</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="actions-cell">
+                                            <a href="/stats/@link.Id" class="action-btn details">
+                                                <i class="fas fa-chart-bar"></i> Статистика
+                                            </a>
+                                            <a href="/track/@link.Id" target="_blank" class="action-btn" style="background: var(--success); color: white;">
+                                                <i class="fas fa-external-link-alt"></i> Тест
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <div class="no-data">
+                        <i class="fas fa-link-slash"></i>
+                        <h3>Нет созданных ссылок</h3>
+                        <p>Создайте первую ссылку выше</p>
+                    </div>
+                }
+            </div>
+        </div>
+        
+        <!-- Вкладка аналитики -->
+        <div id="analysis-tab" class="tab-content">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div style="background: var(--light); padding: 25px; border-radius: 15px;">
+                    <h3 style="color: var(--primary); margin-bottom: 20px;">📊 Браузеры</h3>
+                    <div id="browser-chart"></div>
+                </div>
+                <div style="background: var(--light); padding: 25px; border-radius: 15px;">
+                    <h3 style="color: var(--primary); margin-bottom: 20px;">📱 Устройства</h3>
+                    <div id="device-chart"></div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px; background: var(--light); padding: 25px; border-radius: 15px;">
+                <h3 style="color: var(--primary); margin-bottom: 20px;">🕒 Активность по часам</h3>
+                <div id="hours-chart"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Модальное окно с деталями -->
+    <div id="details-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-info-circle"></i> Детальная информация</h2>
+                <button class="close-modal" onclick="closeModal()">×</button>
+            </div>
+            <div id="modal-body">
+                <!-- Контент загружается через JavaScript -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Функция создания ссылки
+        async function createLink() {
+            const url = document.getElementById('targetUrl').value;
+            const note = document.getElementById('note').value;
+            
+            if (!url) {
+                alert('Введите URL');
+                return;
+            }
+            
+            const response = await fetch('/api/tracker/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ TargetUrl: url, Note: note })
+            });
+            
+            const result = await response.json();
+            const resultDiv = document.getElementById('create-result');
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div style="background: #d1fae5; padding: 20px; border-radius: 10px;">
+                        <h3 style="color: #059669; margin-bottom: 15px;">
+                            <i class="fas fa-check-circle"></i> Ссылка успешно создана!
+                        </h3>
+                        
+                        <div style="margin: 15px 0;">
+                            <strong><i class="fas fa-link"></i> Целевой URL:</strong>
+                            <div style="background: white; padding: 10px; border-radius: 5px; margin-top: 5px;">
+                                <a href="${result.targetUrl}" target="_blank" style="color: #4f46e5; text-decoration: none;">
+                                    <i class="fas fa-external-link-alt"></i> ${result.targetUrl}
+                                </a>
+                            </div>
+                        </div>
+                        
+                        <div style="margin: 15px 0;">
+                            <strong><i class="fas fa-eye"></i> Отслеживаемая ссылка:</strong>
+                            <div style="display: flex; gap: 10px; margin-top: 5px;">
+                                <input type="text" value="${result.trackingUrl}" 
+                                       style="flex: 1; padding: 10px; border: 2px solid #10b981; border-radius: 5px;" 
+                                       readonly>
+                                <button onclick="copyToClipboard('${result.trackingUrl}')" 
+                                        style="background: var(--primary); color: white; border: none; padding: 0 20px; border-radius: 5px; cursor: pointer;">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div style="margin: 15px 0;">
+                            <strong><i class="fas fa-chart-bar"></i> Статистика:</strong>
+                            <div style="display: flex; gap: 10px; margin-top: 5px;">
+                                <input type="text" value="${result.adminUrl}" 
+                                       style="flex: 1; padding: 10px; border: 2px solid #3b82f6; border-radius: 5px;" 
+                                       readonly>
+                                <button onclick="copyToClipboard('${result.adminUrl}')" 
+                                        style="background: #3b82f6; color: white; border: none; padding: 0 20px; border-radius: 5px; cursor: pointer;">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; margin-top: 20px;">
+                            <button onclick="copyToClipboard('${result.trackingUrl}')" class="btn" style="flex: 1;">
+                                <i class="fas fa-copy"></i> Копировать отслеживаемую ссылку
+                            </button>
+                            <button onclick="copyToClipboard('${result.targetUrl}')" class="btn" style="background: var(--secondary); flex: 1;">
+                                <i class="fas fa-link"></i> Копировать целевой URL
+                            </button>
+                        </div>
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+                
+                // Очистить поля
+                document.getElementById('targetUrl').value = '';
+                document.getElementById('note').value = '';
+                
+                // Обновить страницу через 3 секунды
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+                
+            } else {
+                resultDiv.innerHTML = `
+                    <div style="background: #fee2e2; padding: 15px; border-radius: 10px;">
+                        <p style="color: #dc2626;">
+                            <i class="fas fa-exclamation-circle"></i> Ошибка: ${result.message}
+                        </p>
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+            }
+        }
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            alert('Скопировано в буфер обмена!');
+        }
+        
+        // Переключение вкладок
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+            
+            if (tabName === 'analysis') {
+                updateCharts();
+            }
+        }
+        
+        // Фильтрация таблицы
+        function applyFilters() {
+            const ipFilter = document.getElementById('searchIp').value.toLowerCase();
+            const browserFilter = document.getElementById('searchBrowser').value.toLowerCase();
+            const dateFilter = document.getElementById('searchDate').value;
+            
+            const rows = document.querySelectorAll('#visits-table tbody tr');
+            
+            rows.forEach(row => {
+                const ip = row.cells[2].textContent.toLowerCase();
+                const browser = row.cells[3].textContent.toLowerCase();
+                const date = row.cells[1].textContent.split(' ')[0];
+                
+                const matchesIp = !ipFilter || ip.includes(ipFilter);
+                const matchesBrowser = !browserFilter || browser.includes(browserFilter);
+                const matchesDate = !dateFilter || date === dateFilter.split('-').reverse().join('.');
+                
+                row.style.display = (matchesIp && matchesBrowser && matchesDate) ? '' : 'none';
+            });
+        }
+        
+        function resetFilters() {
+            document.getElementById('searchIp').value = '';
+            document.getElementById('searchBrowser').value = '';
+            document.getElementById('searchDate').value = '';
+            applyFilters();
+        }
+        
+        // Модальное окно
+        function showDetails(visitId) {
+            fetch('/api/tracker/visit/' + visitId)
+                .then(response => response.json())
+                .then(data => {
+                    const modalBody = document.getElementById('modal-body');
+                    modalBody.innerHTML = `
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">ID посещения</div>
+                                <div class="info-value">${data.id}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Время</div>
+                                <div class="info-value">${new Date(data.visitedAt).toLocaleString('ru-RU')}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">IP адрес</div>
+                                <div class="info-value ip-cell">${data.visitorIp}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Тип IP</div>
+                                <div class="info-value">${getIpType(data.visitorIp)}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <div class="info-label">Браузер</div>
+                                <div class="info-value">${data.browserName}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Операционная система</div>
+                                <div class="info-value">${data.osName}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Устройство</div>
+                                <div class="info-value">${data.deviceType}</div>
+                            </div>
+                            <div class="info-item">
+                                <div class="info-label">Реферер</div>
+                                <div class="info-value">${data.referer || '—'}</div>
+                            </div>
+                        </div>
+                        
+                        <h3 style="color: var(--primary); margin: 20px 0 10px;">User-Agent</h3>
+                        <div class="user-agent-details">${data.userAgent}</div>
+                        
+                        <div style="margin-top: 30px; text-align: center;">
+                            <button class="action-btn details" onclick="getIpInfo('${data.visitorIp}')">
+                                <i class="fas fa-map-marker-alt"></i> Геолокация IP
+                            </button>
+                        </div>
+                        
+                        <div id="ip-info" style="margin-top: 20px;"></div>
+                    `;
+                    
+                    document.getElementById('details-modal').style.display = 'flex';
+                })
+                .catch(error => {
+                    alert('Ошибка загрузки данных');
+                });
+        }
+        
+        function closeModal() {
+            document.getElementById('details-modal').style.display = 'none';
+        }
+        
+        function getIpType(ip) {
+            if (ip === '127.0.0.1' || ip === '::1') return 'Локальный';
+            if (ip.startsWith('192.168.') || ip.startsWith('10.')) return 'Локальная сеть';
+            return 'Публичный IP';
+        }
+        
+        function getIpInfo(ip) {
+            if (ip === '127.0.0.1' || ip === '::1') {
+                document.getElementById('ip-info').innerHTML = `
+                    <div style="background: #fef3c7; padding: 15px; border-radius: 10px;">
+                        <strong>Локальный IP адрес</strong><br>
+                        Это ваш компьютер или сервер разработки
+                    </div>
+                `;
+                return;
+            }
+            
+            fetch('/api/tracker/ipinfo/' + ip)
+                .then(response => response.json())
+                .then(data => {
+                    let html = '<div style="background: #dbeafe; padding: 20px; border-radius: 10px; margin-top: 20px;">';
+                    html += '<h4 style="color: var(--primary); margin-bottom: 10px;">🌍 Геолокация</h4>';
+                    
+                    if (data.country) {
+                        html += `<p><strong>Страна:</strong> ${data.country}</p>`;
+                        html += `<p><strong>Город:</strong> ${data.city}</p>`;
+                        html += `<p><strong>Провайдер:</strong> ${data.isp}</p>`;
+                    } else {
+                        html += '<p>Информация о местоположении недоступна</p>';
+                    }
+                    
+                    html += '</div>';
+                    document.getElementById('ip-info').innerHTML = html;
+                });
+        }
+        
+        function deleteVisit(visitId) {
+            if (confirm('Удалить это посещение?')) {
+                fetch('/api/tracker/visit/' + visitId, { method: 'DELETE' })
+                    .then(response => {
+                        if (response.ok) {
+                            location.reload();
+                        } else {
+                            alert('Ошибка удаления');
+                        }
+                    });
+            }
+        }
+        
+        // Графики для аналитики
+        function updateCharts() {
+            const browsers = {
+                'Chrome': 45,
+                'Firefox': 25,
+                'Safari': 15,
+                'Edge': 10,
+                'Other': 5
+            };
+            
+            const devices = {
+                'Desktop': 60,
+                'Mobile': 30,
+                'Tablet': 10
+            };
+            
+            const hours = [2, 5, 8, 12, 15, 20, 25, 30, 22, 18, 12, 8];
+            
+            let browserHtml = '';
+            Object.entries(browsers).forEach(([name, value]) => {
+                browserHtml += `
+                    <div style="margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span>${name}</span>
+                            <span>${value}%</span>
+                        </div>
+                        <div style="height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; width: ${value}%; background: var(--primary);"></div>
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('browser-chart').innerHTML = browserHtml;
+            
+            let deviceHtml = '';
+            Object.entries(devices).forEach(([name, value]) => {
+                deviceHtml += `
+                    <div style="margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div style="width: 20px; height: 20px; background: var(--primary); border-radius: 4px;"></div>
+                            <div style="flex: 1;">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span>${name}</span>
+                                    <span>${value}%</span>
+                                </div>
+                                <div style="height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 5px;">
+                                    <div style="height: 100%; width: ${value}%; background: var(--primary);"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            document.getElementById('device-chart').innerHTML = deviceHtml;
+            
+            let hoursHtml = '<div style="display: flex; align-items: flex-end; height: 200px; gap: 5px; margin-top: 20px;">';
+            hours.forEach((value, hour) => {
+                const height = (value / 30) * 150;
+                hoursHtml += `
+                    <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                        <div style="width: 100%; height: ${height}px; background: var(--primary); border-radius: 5px 5px 0 0;"></div>
+                        <div style="margin-top: 10px; font-size: 0.8rem; color: var(--secondary);">${hour}:00</div>
+                    </div>
+                `;
+            });
+            hoursHtml += '</div>';
+            document.getElementById('hours-chart').innerHTML = hoursHtml;
+        }
+        
+        // Закрыть модальное окно при клике вне его
+        window.onclick = function(event) {
+            const modal = document.getElementById('details-modal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+        
+        // Инициализация графиков при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            if (document.getElementById('analysis-tab').classList.contains('active')) {
+                updateCharts();
+            }
+        });
+    </script>
+</body>
+</html>
+
+@functions {
+    private string GetBrowserName(string userAgent)
+    {
+        if (userAgent.Contains("Chrome")) return "Chrome";
+        if (userAgent.Contains("Firefox")) return "Firefox";
+        if (userAgent.Contains("Safari") && !userAgent.Contains("Chrome")) return "Safari";
+        if (userAgent.Contains("Edge")) return "Edge";
+        if (userAgent.Contains("Opera")) return "Opera";
+        return "Other";
+    }
+    
+    private string GetBrowserClass(string userAgent)
+    {
+        var browser = GetBrowserName(userAgent);
+        return browser.ToLower();
+    }
+    
+    private string GetOSName(string userAgent)
+    {
+        if (userAgent.Contains("Windows")) return "Windows";
+        if (userAgent.Contains("Mac OS")) return "macOS";
+        if (userAgent.Contains("Linux")) return "Linux";
+        if (userAgent.Contains("Android")) return "Android";
+        if (userAgent.Contains("iOS") || userAgent.Contains("iPhone")) return "iOS";
+        return "Unknown OS";
+    }
+    
+    private string GetDeviceType(string userAgent)
+    {
+        if (userAgent.Contains("Mobile")) return "📱 Mobile";
+        if (userAgent.Contains("Tablet")) return "📟 Tablet";
+        return "💻 Desktop";
+    }
+}
