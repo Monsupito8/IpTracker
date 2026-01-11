@@ -7,26 +7,20 @@ using System.Threading.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Добавляем контроллеры (для API)
 builder.Services.AddControllers();
-
-// 2. Добавляем Razor Pages (для админки)
 builder.Services.AddRazorPages();
 
-// 3. Настройка базы данных - ИСПРАВЛЕНО для Railway
 var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "/data/iptracker.db";
-Console.WriteLine($"📁 Путь к БД: {dbPath}");
+Console.WriteLine($"Database path: {dbPath}");
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
-// 4. Настраиваем порт для Railway
 var appPort = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{appPort}");
 
 var app = builder.Build();
 
-// 5. Создаем базу данных при старте
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -34,20 +28,18 @@ using (var scope = app.Services.CreateScope())
     try
     {
         db.Database.EnsureCreated();
-        Console.WriteLine("✅ База данных подключена");
+        Console.WriteLine("Database connected successfully");
 
-        // Выводим количество записей для отладки
         var linksCount = db.TrackingLinks.Count();
         var visitsCount = db.LinkVisits.Count();
-        Console.WriteLine($"📊 В базе: {linksCount} ссылок, {visitsCount} посещений");
+        Console.WriteLine($"Database stats: {linksCount} links, {visitsCount} visits");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Ошибка БД: {ex.Message}");
+        Console.WriteLine($"Database error: {ex.Message}");
     }
 }
 
-// 6. Для продакшена используем HTTPS и обработку ошибок
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
@@ -58,32 +50,27 @@ else
     app.UseHsts();
 }
 
-// 7. Middleware
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthorization();
 
-// 8. Маршруты для API
 app.MapControllers();
-
-// 9. Маршруты для страниц (админка)
 app.MapRazorPages();
 
-// 10. Главная страница с перенаправлением
 app.MapGet("/", () => Results.Content(@"
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset='utf-8'>
     <meta http-equiv='refresh' content='0; url=/admin'>
     <title>IP Tracker</title>
 </head>
 <body>
-    <p>Перенаправление в админ-панель...</p>
+    <p>Redirecting to admin panel...</p>
 </body>
-</html>", "text/html"));
+</html>", "text/html; charset=utf-8"));
 
-// ========== МАРШРУТ СОЗДАНИЯ ССЫЛКИ (ТОЛЬКО ОДИН РАЗ!) ==========
 app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbContext db) =>
 {
     try
@@ -92,16 +79,15 @@ app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbCo
         var targetUrl = form["TargetUrl"].ToString();
         var note = form["Note"].ToString();
 
-        Console.WriteLine($"🔧 Создание ссылки: URL={targetUrl}, Note={note}");
+        Console.WriteLine($"Creating link: URL={targetUrl}, Note={note}");
 
         if (string.IsNullOrEmpty(targetUrl))
         {
-            Console.WriteLine("❌ Пустой URL");
-            context.Response.Redirect("/admin?error=Введите+URL");
+            Console.WriteLine("Empty URL provided");
+            context.Response.Redirect("/admin?error=Please+enter+URL");
             return;
         }
 
-        // Добавляем https:// если нет протокола
         if (!targetUrl.StartsWith("http://") && !targetUrl.StartsWith("https://"))
         {
             targetUrl = "https://" + targetUrl;
@@ -121,22 +107,21 @@ app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbCo
         db.TrackingLinks.Add(trackingLink);
         await db.SaveChangesAsync();
 
-        Console.WriteLine($"✅ Ссылка создана: ID={linkId}");
+        Console.WriteLine($"Link created: ID={linkId}");
 
         var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
         var trackingUrl = $"{baseUrl}/track/{linkId}";
 
-        context.Response.Redirect($"/admin?message=Ссылка+создана&newLink={Uri.EscapeDataString(trackingUrl)}&targetUrl={Uri.EscapeDataString(targetUrl)}&linkId={linkId}");
+        context.Response.Redirect($"/admin?message=Link+created&newLink={Uri.EscapeDataString(trackingUrl)}&targetUrl={Uri.EscapeDataString(targetUrl)}&linkId={linkId}");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Ошибка создания ссылки: {ex.Message}");
-        Console.WriteLine($"❌ StackTrace: {ex.StackTrace}");
-        context.Response.Redirect("/admin?error=Ошибка+создания+ссылки:+" + Uri.EscapeDataString(ex.Message));
+        Console.WriteLine($"Error creating link: {ex.Message}");
+        Console.WriteLine($"StackTrace: {ex.StackTrace}");
+        context.Response.Redirect("/admin?error=Error+creating+link");
     }
 });
 
-// Удаление ссылки
 app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
 {
     try
@@ -147,7 +132,7 @@ app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db
 
         if (link == null)
         {
-            context.Response.Redirect("/admin?error=Ссылка+не+найдена");
+            context.Response.Redirect("/admin?error=Link+not+found");
             return;
         }
 
@@ -157,35 +142,32 @@ app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db
         db.TrackingLinks.Remove(link);
         await db.SaveChangesAsync();
 
-        Console.WriteLine($"🗑️ Ссылка удалена: {id}, посещений: {visitsCount}");
+        Console.WriteLine($"Link deleted: {id}, visits: {visitsCount}");
 
-        context.Response.Redirect($"/admin?message=Ссылка+удалена.+Удалено+{visitsCount}+посещений");
+        context.Response.Redirect($"/admin?message=Link+deleted+with+{visitsCount}+visits");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Ошибка удаления ссылки: {ex.Message}");
-        context.Response.Redirect("/admin?error=Ошибка+удаления");
+        Console.WriteLine($"Error deleting link: {ex.Message}");
+        context.Response.Redirect("/admin?error=Error+deleting+link");
     }
 });
 
-// ========== МАРШРУТ ДЛЯ ТРЕКИНГА (ГЛАВНЫЙ!) ==========
 app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
 {
     try
     {
-        Console.WriteLine($"🔗 Попытка перехода по ссылке: {id}");
+        Console.WriteLine($"Track request for link: {id}");
 
         var link = await db.TrackingLinks.FindAsync(id);
         if (link == null)
         {
-            Console.WriteLine($"❌ Ссылка не найдена: {id}");
+            Console.WriteLine($"Link not found: {id}");
             return Results.Redirect("https://google.com");
         }
 
-        // Получаем IP - ИСПРАВЛЕНО для Railway
         var ip = context.Connection.RemoteIpAddress?.ToString();
         
-        // Railway передает реальный IP через заголовки
         var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
         var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
         
@@ -198,7 +180,6 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
             ip = realIp.Trim();
         }
         
-        // Локальный IP для тестирования
         if (ip == "::1" || ip == "127.0.0.1")
         {
             ip = "127.0.0.1 (localhost)";
@@ -207,9 +188,8 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
         var userAgent = context.Request.Headers["User-Agent"].ToString();
         var referer = context.Request.Headers["Referer"].ToString();
 
-        Console.WriteLine($"📝 Данные посещения: IP={ip}, UserAgent={userAgent}");
+        Console.WriteLine($"Visit data: IP={ip}, UserAgent={userAgent}");
 
-        // Сохраняем посещение
         var visit = new LinkVisit
         {
             LinkId = id,
@@ -222,24 +202,21 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
         db.LinkVisits.Add(visit);
         int saved = await db.SaveChangesAsync();
 
-        Console.WriteLine($"✅ Посещение сохранено для ссылки {id}, ID посещения: {visit.Id}, Записей сохранено: {saved}");
+        Console.WriteLine($"Visit saved for link {id}, Visit ID: {visit.Id}, Records saved: {saved}");
         
-        // Проверяем что действительно сохранилось
         var checkVisit = await db.LinkVisits.FindAsync(visit.Id);
-        Console.WriteLine($"🔍 Проверка: посещение {(checkVisit != null ? "найдено" : "НЕ НАЙДЕНО")} в БД");
+        Console.WriteLine($"Verification: visit {(checkVisit != null ? "found" : "NOT FOUND")} in DB");
 
-        // Перенаправляем
         return Results.Redirect(link.TargetUrl);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Ошибка при трекинге: {ex.Message}");
-        Console.WriteLine($"❌ StackTrace: {ex.StackTrace}");
+        Console.WriteLine($"Error tracking: {ex.Message}");
+        Console.WriteLine($"StackTrace: {ex.StackTrace}");
         return Results.Redirect("https://google.com");
     }
 });
 
-// Страница для отладки трекинга
 app.MapGet("/debug/track", async (ApplicationDbContext db, HttpContext context) =>
 {
     var ip = context.Connection.RemoteIpAddress?.ToString();
@@ -252,30 +229,46 @@ app.MapGet("/debug/track", async (ApplicationDbContext db, HttpContext context) 
     var visitsCount = await db.LinkVisits.CountAsync();
 
     return Results.Content($@"
-        <h1>Отладка трекинга</h1>
-        <h3>IP адреса:</h3>
-        <p><strong>RemoteIpAddress:</strong> {ip}</p>
-        <p><strong>X-Forwarded-For:</strong> {forwardedFor ?? "не установлен"}</p>
-        <p><strong>X-Real-IP:</strong> {realIp ?? "не установлен"}</p>
-        <p><strong>User-Agent:</strong> {userAgent}</p>
-        
-        <h3>База данных:</h3>
-        <p><strong>Ссылок:</strong> {linksCount}</p>
-        <p><strong>Посещений:</strong> {visitsCount}</p>
-        
-        <h3>Все заголовки:</h3>
-        <pre>{headers}</pre>
-        
-        <h3>Тестовые ссылки:</h3>
-        <ul>
-            <li><a href='/track/test123'>/track/test123</a> (несуществующая)</li>
-            <li><a href='/debug/createtest'>Создать тестовую ссылку</a></li>
-        </ul>
-        <a href='/admin'>Админка</a>
-    ", "text/html");
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>Debug - IP Tracker</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; }}
+        h1 {{ color: #333; }}
+        h3 {{ color: #666; margin-top: 20px; }}
+        p {{ margin: 5px 0; }}
+        pre {{ background: #f5f5f5; padding: 10px; border-radius: 5px; }}
+        a {{ color: #4285f4; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <h1>Tracking Debug</h1>
+    <h3>IP Addresses:</h3>
+    <p><strong>RemoteIpAddress:</strong> {ip}</p>
+    <p><strong>X-Forwarded-For:</strong> {forwardedFor ?? "not set"}</p>
+    <p><strong>X-Real-IP:</strong> {realIp ?? "not set"}</p>
+    <p><strong>User-Agent:</strong> {userAgent}</p>
+    
+    <h3>Database:</h3>
+    <p><strong>Links:</strong> {linksCount}</p>
+    <p><strong>Visits:</strong> {visitsCount}</p>
+    
+    <h3>All Headers:</h3>
+    <pre>{headers}</pre>
+    
+    <h3>Test Links:</h3>
+    <ul>
+        <li><a href='/track/test123'>/track/test123</a> (non-existent)</li>
+        <li><a href='/debug/createtest'>Create test link</a></li>
+    </ul>
+    <a href='/admin'>Admin Panel</a>
+</body>
+</html>", "text/html; charset=utf-8");
 });
 
-// Создание тестовой ссылки
 app.MapGet("/debug/createtest", async (ApplicationDbContext db, HttpContext context) =>
 {
     var linkId = "test_" + Guid.NewGuid().ToString("N").Substring(0, 6);
@@ -285,7 +278,7 @@ app.MapGet("/debug/createtest", async (ApplicationDbContext db, HttpContext cont
         Id = linkId,
         CreatedAt = DateTime.UtcNow,
         CreatorIp = "debug",
-        Note = "Тестовая ссылка",
+        Note = "Test link",
         TargetUrl = "https://google.com"
     };
 
@@ -295,20 +288,34 @@ app.MapGet("/debug/createtest", async (ApplicationDbContext db, HttpContext cont
     var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
 
     return Results.Content($@"
-        <h1>Тестовая ссылка создана</h1>
-        <p>ID: <strong>{linkId}</strong></p>
-        <p>Ссылка для тестирования: <a href='/track/{linkId}'>{baseUrl}/track/{linkId}</a></p>
-        <p>Она перенаправляет на: https://google.com</p>
-        <a href='/debug/track'>Вернуться к отладке</a>
-    ", "text/html");
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <title>Test Link Created</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; }}
+        h1 {{ color: #333; }}
+        a {{ color: #4285f4; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <h1>Test Link Created</h1>
+    <p>ID: <strong>{linkId}</strong></p>
+    <p>Test link: <a href='/track/{linkId}'>{baseUrl}/track/{linkId}</a></p>
+    <p>Redirects to: https://google.com</p>
+    <a href='/debug/track'>Back to debug</a>
+</body>
+</html>", "text/html; charset=utf-8");
 });
 
-// Маршрут для страницы ошибки
 app.MapGet("/error", () => Results.Content(@"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ошибка - IP Tracker</title>
+    <meta charset='utf-8'>
+    <title>Error - IP Tracker</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -341,23 +348,23 @@ app.MapGet("/error", () => Results.Content(@"
 </head>
 <body>
     <div class='error-box'>
-        <h1>⚠️ Что-то пошло не так</h1>
-        <p>Произошла ошибка при обработке вашего запроса.</p>
-        <p>Попробуйте вернуться на главную страницу.</p>
-        <a href='/' class='btn'>На главную</a>
-        <a href='/admin' class='btn' style='background:#28a745;'>В админку</a>
+        <h1>Something went wrong</h1>
+        <p>An error occurred while processing your request.</p>
+        <p>Try returning to the home page.</p>
+        <a href='/' class='btn'>Home</a>
+        <a href='/admin' class='btn' style='background:#28a745;'>Admin</a>
     </div>
 </body>
-</html>", "text/html"));
+</html>", "text/html; charset=utf-8"));
 
 app.MapGet("/Home/Error", () => Results.Redirect("/error"));
 
-// Страница Privacy
 app.MapGet("/Privacy", () => Results.Content(@"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Политика конфиденциальности - IP Tracker</title>
+    <meta charset='utf-8'>
+    <title>Privacy Policy - IP Tracker</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -375,20 +382,18 @@ app.MapGet("/Privacy", () => Results.Content(@"
 </head>
 <body>
     <div class='back'>
-        <a href='/' style='color:#007bff; text-decoration:none;'>← Назад</a>
+        <a href='/' style='color:#007bff; text-decoration:none;'>Back</a>
     </div>
-    <h1>Политика конфиденциальности</h1>
-    <p>IP Tracker собирает только необходимую информацию для работы сервиса.</p>
-    <p>Все данные защищены и не передаются третьим лицам.</p>
+    <h1>Privacy Policy</h1>
+    <p>IP Tracker collects only necessary information for service operation.</p>
+    <p>All data is protected and not shared with third parties.</p>
 </body>
-</html>", "text/html"));
+</html>", "text/html; charset=utf-8"));
 
 app.MapGet("/Home", () => Results.Redirect("/"));
 app.MapGet("/Home/Index", () => Results.Redirect("/"));
 
 app.Run();
-
-// ========== МОДЕЛИ И КЛАССЫ В ОДНОМ ФАЙЛЕ ==========
 
 public class TrackingLink
 {
