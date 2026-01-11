@@ -22,12 +22,12 @@
 @functions {
     private string GetBrowserName(string userAgent)
     {
-        if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
+        if (string.IsNullOrEmpty(userAgent)) return "Unknown";
         if (userAgent.Contains("Chrome")) return "Chrome";
         if (userAgent.Contains("Firefox")) return "Firefox";
         if (userAgent.Contains("Safari")) return "Safari";
         if (userAgent.Contains("Edge")) return "Edge";
-        return "Другой";
+        return "Other";
     }
     
     private string GeneratePrettyLink(string linkId)
@@ -49,11 +49,11 @@
 }
 
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔗 IP Tracker - Админка</title>
+    <title>IP Tracker - Admin Panel</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -268,93 +268,93 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔗 IP Tracker - Админ панель</h1>
-            <p style="color: #666;">Отслеживайте переходы по вашим ссылкам</p>
+            <h1>IP Tracker - Admin Panel</h1>
+            <p style="color: #666;">Track clicks on your links</p>
         </div>
         
         @if (!string.IsNullOrEmpty(Request.Query["message"]))
         {
             <div class="message success">
-                ✅ @Request.Query["message"]
+                @Request.Query["message"]
             </div>
         }
         
         @if (!string.IsNullOrEmpty(Request.Query["error"]))
         {
             <div class="message error">
-                ❌ @Request.Query["error"]
+                @Request.Query["error"]
             </div>
         }
         
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-number">@totalVisits</div>
-                <div class="stat-label">Всего переходов</div>
+                <div class="stat-label">Total Visits</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">@uniqueIPs</div>
-                <div class="stat-label">Уникальных IP</div>
+                <div class="stat-label">Unique IPs</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">@todayVisits</div>
-                <div class="stat-label">Сегодня</div>
+                <div class="stat-label">Today</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">@allLinks.Count</div>
-                <div class="stat-label">Активных ссылок</div>
+                <div class="stat-label">Active Links</div>
             </div>
         </div>
         
         <div class="section">
-            <h2>➕ Создать новую ссылку</h2>
+            <h2>Create New Link</h2>
             <form method="post" action="/api/tracker/generate">
                 <div class="form-group">
-                    <label for="targetUrl">Целевой URL:</label>
+                    <label for="targetUrl">Target URL:</label>
                     <input type="url" id="targetUrl" name="TargetUrl" 
                            placeholder="https://example.com" required>
                 </div>
                 <div class="form-group">
-                    <label for="note">Название (опционально):</label>
+                    <label for="note">Name (optional):</label>
                     <input type="text" id="note" name="Note" 
-                           placeholder="Моя ссылка">
+                           placeholder="My link">
                 </div>
                 <button type="submit" class="btn btn-success">
-                    Создать ссылку
+                    Create Link
                 </button>
             </form>
             
             @if (!string.IsNullOrEmpty(Request.Query["newLink"]))
             {
                 <div style="margin-top: 20px; padding: 15px; background: #e8f0fe; border-radius: 8px;">
-                    <h3>✅ Ссылка создана!</h3>
-                    <p>Ваша ссылка для отслеживания:</p>
+                    <h3>Link Created!</h3>
+                    <p>Your tracking link:</p>
                     <div style="background: white; padding: 10px; border-radius: 6px; margin: 10px 0;">
                         <strong id="newLink">@GeneratePrettyLink(Request.Query["linkId"])</strong>
                         <button class="copy-btn" onclick="copyToClipboard('@GeneratePrettyLink(Request.Query["linkId"])')">
-                            Копировать
+                            Copy
                         </button>
                     </div>
                     <p style="color: #666; font-size: 0.9rem;">
-                        <small>Реальная ссылка: @Request.Query["newLink"]</small><br>
-                        <small>Перенаправляет на: @Request.Query["targetUrl"]</small>
+                        <small>Real link: @Request.Query["newLink"]</small><br>
+                        <small>Redirects to: @Request.Query["targetUrl"]</small>
                     </p>
                 </div>
             }
         </div>
         
         <div class="section">
-            <h2>📊 Ваши ссылки</h2>
+            <h2>Your Links</h2>
             @if (allLinks.Any())
             {
                 <table class="links-table">
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Название</th>
-                            <th>Цель</th>
-                            <th>Переходы</th>
-                            <th>Создана</th>
-                            <th>Действия</th>
+                            <th>Name</th>
+                            <th>Target</th>
+                            <th>Visits</th>
+                            <th>Created</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -362,22 +362,22 @@
                         {
                             <tr>
                                 <td><strong>@link.Id</strong></td>
-                                <td>@(link.Note ?? "Без названия")</td>
+                                <td>@(link.Note ?? "No name")</td>
                                 <td>
                                     <a href="@link.TargetUrl" target="_blank" class="url">
                                         @(link.TargetUrl.Length > 40 ? link.TargetUrl.Substring(0, 40) + "..." : link.TargetUrl)
                                     </a>
                                 </td>
                                 <td><strong>@link.Visits.Count</strong></td>
-                                <td>@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</td>
+                                <td>@link.CreatedAt.ToString("MM/dd/yyyy HH:mm")</td>
                                 <td>
                                     <button class="btn" onclick="copyPrettyLink('@link.Id')">
-                                        Копировать
+                                        Copy
                                     </button>
                                     <a href="/api/tracker/delete/@link.Id" 
                                        class="btn btn-danger"
-                                       onclick="return confirm('Удалить эту ссылку?')">
-                                        Удалить
+                                       onclick="return confirm('Delete this link?')">
+                                        Delete
                                     </a>
                                 </td>
                             </tr>
@@ -389,14 +389,14 @@
             {
                 <div class="empty-state">
                     <div style="font-size: 3rem; margin-bottom: 15px;">🔗</div>
-                    <h3>Нет созданных ссылок</h3>
-                    <p>Создайте первую ссылку выше</p>
+                    <h3>No links created</h3>
+                    <p>Create your first link above</p>
                 </div>
             }
         </div>
         
         <div class="section">
-            <h2>👁️ Последние переходы</h2>
+            <h2>Recent Visits</h2>
             @if (allVisits.Any())
             {
                 <div class="visits-list">
@@ -407,18 +407,18 @@
                                 <div>
                                     <span class="ip">@visit.VisitorIp</span>
                                     <span style="color: #666;">
-                                        @visit.VisitedAt.ToString("dd.MM.yyyy HH:mm:ss")
+                                        @visit.VisitedAt.ToString("MM/dd/yyyy HH:mm:ss")
                                     </span>
                                 </div>
                                 @if (visit.Link != null)
                                 {
                                     <span style="color: #888;">
-                                        Ссылка: @visit.Link.Id
+                                        Link: @visit.Link.Id
                                     </span>
                                 }
                             </div>
                             <div style="margin-top: 5px; color: #666; font-size: 0.9rem;">
-                                📱 @GetBrowserName(visit.UserAgent)
+                                @GetBrowserName(visit.UserAgent)
                             </div>
                         </div>
                     }
@@ -426,7 +426,7 @@
                 @if (allVisits.Count > 20)
                 {
                     <p style="text-align: center; margin-top: 15px; color: #666;">
-                        Показано 20 из @allVisits.Count посещений
+                        Showing 20 of @allVisits.Count visits
                     </p>
                 }
             }
@@ -434,21 +434,21 @@
             {
                 <div class="empty-state">
                     <div style="font-size: 3rem; margin-bottom: 15px;">👁️</div>
-                    <h3>Нет переходов</h3>
-                    <p>Пока никто не перешел по вашим ссылкам</p>
+                    <h3>No visits yet</h3>
+                    <p>No one has clicked your links yet</p>
                 </div>
             }
         </div>
     </div>
     
-    <button class="refresh-btn" onclick="location.reload()" title="Обновить">
+    <button class="refresh-btn" onclick="location.reload()" title="Refresh">
         🔄
     </button>
     
     <script>
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('Скопировано: ' + text);
+                alert('Copied: ' + text);
             });
         }
         
@@ -461,16 +461,15 @@
                 "lnk.to",
                 "go.to"
             ];
-            const domain = prettyDomains[Math.floor(Math.random() * prettyDomains.length)];
+            const domain = prettyDomains[Math.floor(Math.random() * prettyDomains.Length)];
             const prettyLink = `https://${domain}/${linkId}`;
             
             copyToClipboard(prettyLink);
             
-            // Показываем уведомление
-            alert(`Скопировано: ${prettyLink}\n\nФактическая ссылка: ${window.location.origin}/track/${linkId}`);
+            alert(`Copied: ${prettyLink}\n\nReal link: ${window.location.origin}/track/${linkId}`);
         }
         
-        // Автообновление каждые 30 секунд
+        // Auto refresh every 30 seconds
         setTimeout(() => {
             location.reload();
         }, 30000);
