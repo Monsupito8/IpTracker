@@ -153,6 +153,7 @@ app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db
     }
 });
 
+// ГЛАВНЫЙ МАРШРУТ С ГЕОЛОКАЦИЕЙ
 app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
 {
     try
@@ -202,18 +203,186 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
         db.LinkVisits.Add(visit);
         int saved = await db.SaveChangesAsync();
 
-        Console.WriteLine($"Visit saved for link {id}, Visit ID: {visit.Id}, Records saved: {saved}");
-        
-        var checkVisit = await db.LinkVisits.FindAsync(visit.Id);
-        Console.WriteLine($"Verification: visit {(checkVisit != null ? "found" : "NOT FOUND")} in DB");
+        Console.WriteLine($"Visit saved for link {id}, Visit ID: {visit.Id}");
 
-        return Results.Redirect(link.TargetUrl);
+        // Возвращаем страницу с картой и геолокацией
+        return Results.Content($@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Loading...</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+            padding: 20px;
+        }}
+        .container {{
+            text-align: center;
+            padding: 40px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            max-width: 600px;
+            width: 100%;
+        }}
+        .loader {{
+            border: 5px solid rgba(255,255,255,0.3);
+            border-top: 5px solid white;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }}
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        #map {{
+            width: 100%;
+            height: 400px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }}
+        .info {{
+            background: rgba(255,255,255,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: left;
+            display: none;
+        }}
+    </style>
+    <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' />
+    <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
+</head>
+<body>
+    <div class='container'>
+        <h1>📍 Location Tracking</h1>
+        <div class='loader' id='loader'></div>
+        <p id='status'>Requesting location access...</p>
+        <div id='map'></div>
+        <div class='info' id='info'></div>
+    </div>
+
+    <script>
+        const visitId = {visit.Id};
+        const linkId = '{id}';
+        const targetUrl = '{link.TargetUrl}';
+
+        if (navigator.geolocation) {{
+            navigator.geolocation.getCurrentPosition(
+                function(position) {{
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const accuracy = position.coords.accuracy;
+
+                    document.getElementById('status').textContent = 'Location captured! Redirecting...';
+                    document.getElementById('loader').style.display = 'none';
+                    document.getElementById('map').style.display = 'block';
+                    document.getElementById('info').style.display = 'block';
+
+                    const map = L.map('map').setView([lat, lon], 13);
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '© OpenStreetMap'
+                    }}).addTo(map);
+                    
+                    L.marker([lat, lon]).addTo(map)
+                        .bindPopup('Your location')
+                        .openPopup();
+
+                    document.getElementById('info').innerHTML = 
+                        '<strong>📍 Coordinates:</strong><br>' +
+                        'Latitude: ' + lat.toFixed(6) + '<br>' +
+                        'Longitude: ' + lon.toFixed(6) + '<br>' +
+                        'Accuracy: ±' + Math.round(accuracy) + ' meters';
+
+                    fetch('/api/tracker/location', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            visitId: visitId,
+                            linkId: linkId,
+                            latitude: lat,
+                            longitude: lon,
+                            accuracy: accuracy
+                        }})
+                    }});
+
+                    setTimeout(function() {{
+                        window.location.href = targetUrl;
+                    }}, 3000);
+                }},
+                function(error) {{
+                    document.getElementById('status').textContent = 'Location access denied. Redirecting...';
+                    document.getElementById('loader').style.display = 'none';
+                    
+                    setTimeout(function() {{
+                        window.location.href = targetUrl;
+                    }}, 2000);
+                }}
+            );
+        }} else {{
+            document.getElementById('status').textContent = 'Geolocation not supported. Redirecting...';
+            document.getElementById('loader').style.display = 'none';
+            setTimeout(function() {{
+                window.location.href = targetUrl;
+            }}, 2000);
+        }}
+    </script>
+</body>
+</html>", "text/html; charset=utf-8");
     }
     catch (Exception ex)
     {
         Console.WriteLine($"Error tracking: {ex.Message}");
-        Console.WriteLine($"StackTrace: {ex.StackTrace}");
         return Results.Redirect("https://google.com");
+    }
+});
+
+// API для сохранения геолокации
+app.MapPost("/api/tracker/location", async (HttpContext context, ApplicationDbContext db) =>
+{
+    try
+    {
+        using var reader = new StreamReader(context.Request.Body);
+        var body = await reader.ReadToEndAsync();
+        var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(body);
+
+        if (data != null && data.ContainsKey("visitId"))
+        {
+            var visitId = int.Parse(data["visitId"].ToString());
+            var visit = await db.LinkVisits.FindAsync(visitId);
+
+            if (visit != null)
+            {
+                visit.Latitude = data.ContainsKey("latitude") ? double.Parse(data["latitude"].ToString()) : null;
+                visit.Longitude = data.ContainsKey("longitude") ? double.Parse(data["longitude"].ToString()) : null;
+                visit.Accuracy = data.ContainsKey("accuracy") ? double.Parse(data["accuracy"].ToString()) : null;
+
+                await db.SaveChangesAsync();
+
+                Console.WriteLine($"Geolocation saved: Lat={visit.Latitude}, Lon={visit.Longitude}");
+                return Results.Ok(new { success = true });
+            }
+        }
+
+        return Results.BadRequest(new { success = false });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error saving geolocation: {ex.Message}");
+        return Results.StatusCode(500);
     }
 });
 
@@ -358,7 +527,6 @@ app.MapGet("/error", () => Results.Content(@"
 </html>", "text/html; charset=utf-8"));
 
 app.MapGet("/Home/Error", () => Results.Redirect("/error"));
-
 app.MapGet("/Privacy", () => Results.Content(@"
 <!DOCTYPE html>
 <html>
@@ -395,6 +563,7 @@ app.MapGet("/Home/Index", () => Results.Redirect("/"));
 
 app.Run();
 
+// МОДЕЛИ
 public class TrackingLink
 {
     public string Id { get; set; } = string.Empty;
@@ -414,6 +583,11 @@ public class LinkVisit
     public string UserAgent { get; set; } = string.Empty;
     public string? Referer { get; set; }
     public DateTime VisitedAt { get; set; }
+    
+    // ГЕОЛОКАЦИЯ
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    public double? Accuracy { get; set; }
 
     public TrackingLink? Link { get; set; }
 }
