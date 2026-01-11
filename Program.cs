@@ -13,9 +13,12 @@ builder.Services.AddControllers();
 // 2. Добавляем Razor Pages (для админки)
 builder.Services.AddRazorPages();
 
-// 3. Настройка базы данных
+// 3. Настройка базы данных - ИСПРАВЛЕНО для Railway
+var dbPath = Environment.GetEnvironmentVariable("DATABASE_PATH") ?? "/data/iptracker.db";
+Console.WriteLine($"📁 Путь к БД: {dbPath}");
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite("Data Source=iptracker.db"));
+    options.UseSqlite($"Data Source={dbPath}"));
 
 // 4. Настраиваем порт для Railway
 var appPort = Environment.GetEnvironmentVariable("PORT") ?? "8080";
@@ -27,13 +30,21 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.EnsureCreated();
-    Console.WriteLine("✅ База данных подключена");
+    
+    try
+    {
+        db.Database.EnsureCreated();
+        Console.WriteLine("✅ База данных подключена");
 
-    // Выводим количество записей для отладки
-    var linksCount = db.TrackingLinks.Count();
-    var visitsCount = db.LinkVisits.Count();
-    Console.WriteLine($"📊 В базе: {linksCount} ссылок, {visitsCount} посещений");
+        // Выводим количество записей для отладки
+        var linksCount = db.TrackingLinks.Count();
+        var visitsCount = db.LinkVisits.Count();
+        Console.WriteLine($"📊 В базе: {linksCount} ссылок, {visitsCount} посещений");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Ошибка БД: {ex.Message}");
+    }
 }
 
 // 6. Для продакшена используем HTTPS и обработку ошибок
@@ -43,8 +54,7 @@ if (app.Environment.IsDevelopment())
 }
 else
 {
-    // Убедись что есть этот маршрут
-    app.UseExceptionHandler("/Home/Error");
+    app.UseExceptionHandler("/error");
     app.UseHsts();
 }
 
@@ -73,21 +83,25 @@ app.MapGet("/", () => Results.Content(@"
 </body>
 </html>", "text/html"));
 
-// Обработка формы создания ссылки
+// ========== МАРШРУТ СОЗДАНИЯ ССЫЛКИ (ТОЛЬКО ОДИН РАЗ!) ==========
 app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbContext db) =>
 {
-    var form = await context.Request.ReadFormAsync();
-    var targetUrl = form["TargetUrl"].ToString();
-    var note = form["Note"].ToString();
-
-    if (string.IsNullOrEmpty(targetUrl))
-    {
-        context.Response.Redirect("/admin?error=Введите+URL");
-        return;
-    }
-
     try
     {
+        var form = await context.Request.ReadFormAsync();
+        var targetUrl = form["TargetUrl"].ToString();
+        var note = form["Note"].ToString();
+
+        Console.WriteLine($"🔧 Создание ссылки: URL={targetUrl}, Note={note}");
+
+        if (string.IsNullOrEmpty(targetUrl))
+        {
+            Console.WriteLine("❌ Пустой URL");
+            context.Response.Redirect("/admin?error=Введите+URL");
+            return;
+        }
+
+        // Добавляем https:// если нет протокола
         if (!targetUrl.StartsWith("http://") && !targetUrl.StartsWith("https://"))
         {
             targetUrl = "https://" + targetUrl;
@@ -107,15 +121,18 @@ app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbCo
         db.TrackingLinks.Add(trackingLink);
         await db.SaveChangesAsync();
 
+        Console.WriteLine($"✅ Ссылка создана: ID={linkId}");
+
         var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
         var trackingUrl = $"{baseUrl}/track/{linkId}";
 
-        context.Response.Redirect($"/admin?message=Ссылка+создана&newLink={trackingUrl}&targetUrl={Uri.EscapeDataString(targetUrl)}");
+        context.Response.Redirect($"/admin?message=Ссылка+создана&newLink={Uri.EscapeDataString(trackingUrl)}&targetUrl={Uri.EscapeDataString(targetUrl)}&linkId={linkId}");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Ошибка создания ссылки: {ex.Message}");
-        context.Response.Redirect("/admin?error=Ошибка+создания+ссылки");
+        Console.WriteLine($"❌ Ошибка создания ссылки: {ex.Message}");
+        Console.WriteLine($"❌ StackTrace: {ex.StackTrace}");
+        context.Response.Redirect("/admin?error=Ошибка+создания+ссылки:+" + Uri.EscapeDataString(ex.Message));
     }
 });
 
@@ -140,16 +157,18 @@ app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db
         db.TrackingLinks.Remove(link);
         await db.SaveChangesAsync();
 
+        Console.WriteLine($"🗑️ Ссылка удалена: {id}, посещений: {visitsCount}");
+
         context.Response.Redirect($"/admin?message=Ссылка+удалена.+Удалено+{visitsCount}+посещений");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Ошибка удаления ссылки: {ex.Message}");
+        Console.WriteLine($"❌ Ошибка удаления ссылки: {ex.Message}");
         context.Response.Redirect("/admin?error=Ошибка+удаления");
     }
 });
 
-// Маршрут для трекинга - добавляем перед app.Run()
+// ========== МАРШРУТ ДЛЯ ТРЕКИНГА (ГЛАВНЫЙ!) ==========
 app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
 {
     try
@@ -163,15 +182,26 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
             return Results.Redirect("https://google.com");
         }
 
-        // Получаем IP
+        // Получаем IP - ИСПРАВЛЕНО для Railway
         var ip = context.Connection.RemoteIpAddress?.ToString();
-        if (ip == "::1") ip = "127.0.0.1";
-
-        // Проверяем заголовки для реального IP
+        
+        // Railway передает реальный IP через заголовки
         var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
+        
         if (!string.IsNullOrEmpty(forwardedFor))
         {
             ip = forwardedFor.Split(',')[0].Trim();
+        }
+        else if (!string.IsNullOrEmpty(realIp))
+        {
+            ip = realIp.Trim();
+        }
+        
+        // Локальный IP для тестирования
+        if (ip == "::1" || ip == "127.0.0.1")
+        {
+            ip = "127.0.0.1 (localhost)";
         }
 
         var userAgent = context.Request.Headers["User-Agent"].ToString();
@@ -190,9 +220,13 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
         };
 
         db.LinkVisits.Add(visit);
-        await db.SaveChangesAsync();
+        int saved = await db.SaveChangesAsync();
 
-        Console.WriteLine($"✅ Посещение сохранено для ссылки {id}, ID посещения: {visit.Id}");
+        Console.WriteLine($"✅ Посещение сохранено для ссылки {id}, ID посещения: {visit.Id}, Записей сохранено: {saved}");
+        
+        // Проверяем что действительно сохранилось
+        var checkVisit = await db.LinkVisits.FindAsync(visit.Id);
+        Console.WriteLine($"🔍 Проверка: посещение {(checkVisit != null ? "найдено" : "НЕ НАЙДЕНО")} в БД");
 
         // Перенаправляем
         return Results.Redirect(link.TargetUrl);
@@ -209,15 +243,29 @@ app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext
 app.MapGet("/debug/track", async (ApplicationDbContext db, HttpContext context) =>
 {
     var ip = context.Connection.RemoteIpAddress?.ToString();
+    var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+    var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
     var userAgent = context.Request.Headers["User-Agent"].ToString();
     var headers = string.Join("<br>", context.Request.Headers.Select(h => $"{h.Key}: {h.Value}"));
+    
+    var linksCount = await db.TrackingLinks.CountAsync();
+    var visitsCount = await db.LinkVisits.CountAsync();
 
     return Results.Content($@"
         <h1>Отладка трекинга</h1>
-        <p><strong>Ваш IP:</strong> {ip}</p>
+        <h3>IP адреса:</h3>
+        <p><strong>RemoteIpAddress:</strong> {ip}</p>
+        <p><strong>X-Forwarded-For:</strong> {forwardedFor ?? "не установлен"}</p>
+        <p><strong>X-Real-IP:</strong> {realIp ?? "не установлен"}</p>
         <p><strong>User-Agent:</strong> {userAgent}</p>
+        
+        <h3>База данных:</h3>
+        <p><strong>Ссылок:</strong> {linksCount}</p>
+        <p><strong>Посещений:</strong> {visitsCount}</p>
+        
         <h3>Все заголовки:</h3>
         <pre>{headers}</pre>
+        
         <h3>Тестовые ссылки:</h3>
         <ul>
             <li><a href='/track/test123'>/track/test123</a> (несуществующая)</li>
@@ -228,7 +276,7 @@ app.MapGet("/debug/track", async (ApplicationDbContext db, HttpContext context) 
 });
 
 // Создание тестовой ссылки
-app.MapGet("/debug/createtest", async (ApplicationDbContext db) =>
+app.MapGet("/debug/createtest", async (ApplicationDbContext db, HttpContext context) =>
 {
     var linkId = "test_" + Guid.NewGuid().ToString("N").Substring(0, 6);
 
@@ -243,96 +291,16 @@ app.MapGet("/debug/createtest", async (ApplicationDbContext db) =>
 
     db.TrackingLinks.Add(link);
     await db.SaveChangesAsync();
+    
+    var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
 
     return Results.Content($@"
         <h1>Тестовая ссылка создана</h1>
         <p>ID: <strong>{linkId}</strong></p>
-        <p>Ссылка для тестирования: <a href='/track/{linkId}'>/track/{linkId}</a></p>
+        <p>Ссылка для тестирования: <a href='/track/{linkId}'>{baseUrl}/track/{linkId}</a></p>
         <p>Она перенаправляет на: https://google.com</p>
         <a href='/debug/track'>Вернуться к отладке</a>
     ", "text/html");
-});
-
-// Обработка формы создания ссылки
-app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbContext db) =>
-{
-    var form = await context.Request.ReadFormAsync();
-    var targetUrl = form["TargetUrl"].ToString();
-    var note = form["Note"].ToString();
-
-    if (string.IsNullOrEmpty(targetUrl))
-    {
-        context.Response.Redirect("/admin?error=Введите+URL");
-        return;
-    }
-
-    try
-    {
-        if (!targetUrl.StartsWith("http://") && !targetUrl.StartsWith("https://"))
-        {
-            targetUrl = "https://" + targetUrl;
-        }
-
-        var linkId = Guid.NewGuid().ToString("N").Substring(0, 8);
-
-        var trackingLink = new TrackingLink
-        {
-            Id = linkId,
-            CreatedAt = DateTime.UtcNow,
-            CreatorIp = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
-            Note = note?.Trim(),
-            TargetUrl = targetUrl.Trim()
-        };
-
-        db.TrackingLinks.Add(trackingLink);
-        await db.SaveChangesAsync();
-
-        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
-        var trackingUrl = $"{baseUrl}/track/{linkId}";
-
-        // Генерируем красивый домен
-        var prettyDomains = new[] { "go.link", "click.pro", "redirect.me", "url.short", "lnk.to" };
-        var random = new Random();
-        var prettyDomain = prettyDomains[random.Next(prettyDomains.Length)];
-        var prettyLink = $"https://{prettyDomain}/{linkId}";
-
-        context.Response.Redirect($"/admin?message=Ссылка+создана&newLink={Uri.EscapeDataString(trackingUrl)}&targetUrl={Uri.EscapeDataString(targetUrl)}&linkId={linkId}");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Ошибка создания ссылки: {ex.Message}");
-        context.Response.Redirect("/admin?error=Ошибка+создания+ссылки");
-    }
-});
-
-// Удаление ссылки
-app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
-{
-    try
-    {
-        var link = await db.TrackingLinks
-            .Include(l => l.Visits)
-            .FirstOrDefaultAsync(l => l.Id == id);
-
-        if (link == null)
-        {
-            context.Response.Redirect("/admin?error=Ссылка+не+найдена");
-            return;
-        }
-
-        int visitsCount = link.Visits.Count;
-
-        db.LinkVisits.RemoveRange(link.Visits);
-        db.TrackingLinks.Remove(link);
-        await db.SaveChangesAsync();
-
-        context.Response.Redirect($"/admin?message=Ссылка+удалена.+Удалено+{visitsCount}+посещений");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Ошибка удаления ссылки: {ex.Message}");
-        context.Response.Redirect("/admin?error=Ошибка+удаления");
-    }
 });
 
 // Маршрут для страницы ошибки
@@ -382,7 +350,6 @@ app.MapGet("/error", () => Results.Content(@"
 </body>
 </html>", "text/html"));
 
-// Или лучше перенаправление на главную при ошибках
 app.MapGet("/Home/Error", () => Results.Redirect("/error"));
 
 // Страница Privacy
@@ -416,7 +383,6 @@ app.MapGet("/Privacy", () => Results.Content(@"
 </body>
 </html>", "text/html"));
 
-// Главная страница (Home)
 app.MapGet("/Home", () => Results.Redirect("/"));
 app.MapGet("/Home/Index", () => Results.Redirect("/"));
 
@@ -474,7 +440,6 @@ public class ApplicationDbContext : DbContext
     }
 }
 
-// Добавьте этот статический класс в Program.cs после всех других классов
 public static class StringExtensions
 {
     public static string Truncate(this string value, int maxLength)
