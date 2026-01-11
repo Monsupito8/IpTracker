@@ -19,6 +19,35 @@
     var todayVisits = allVisits.Count(v => v.VisitedAt.Date == DateTime.UtcNow.Date);
 }
 
+@functions {
+    private string GetBrowserName(string userAgent)
+    {
+        if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
+        if (userAgent.Contains("Chrome")) return "Chrome";
+        if (userAgent.Contains("Firefox")) return "Firefox";
+        if (userAgent.Contains("Safari")) return "Safari";
+        if (userAgent.Contains("Edge")) return "Edge";
+        return "Другой";
+    }
+    
+    private string GeneratePrettyLink(string linkId)
+    {
+        var prettyDomains = new[]
+        {
+            "go.link",
+            "click.pro",
+            "redirect.me",
+            "url.short",
+            "lnk.to",
+            "go.to"
+        };
+        
+        var random = new Random();
+        var domain = prettyDomains[random.Next(prettyDomains.Length)];
+        return $"https://{domain}/{linkId}";
+    }
+}
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -300,12 +329,15 @@
                     <h3>✅ Ссылка создана!</h3>
                     <p>Ваша ссылка для отслеживания:</p>
                     <div style="background: white; padding: 10px; border-radius: 6px; margin: 10px 0;">
-                        <strong id="newLink">@Request.Query["newLink"]</strong>
-                        <button class="copy-btn" onclick="copyToClipboard('@Request.Query["newLink"]')">
+                        <strong id="newLink">@GeneratePrettyLink(Request.Query["linkId"])</strong>
+                        <button class="copy-btn" onclick="copyToClipboard('@GeneratePrettyLink(Request.Query["linkId"])')">
                             Копировать
                         </button>
                     </div>
-                    <p><small>Эта ссылка перенаправляет на: @Request.Query["targetUrl"]</small></p>
+                    <p style="color: #666; font-size: 0.9rem;">
+                        <small>Реальная ссылка: @Request.Query["newLink"]</small><br>
+                        <small>Перенаправляет на: @Request.Query["targetUrl"]</small>
+                    </p>
                 </div>
             }
         </div>
@@ -333,13 +365,13 @@
                                 <td>@(link.Note ?? "Без названия")</td>
                                 <td>
                                     <a href="@link.TargetUrl" target="_blank" class="url">
-                                        @link.TargetUrl.Truncate(40)
+                                        @(link.TargetUrl.Length > 40 ? link.TargetUrl.Substring(0, 40) + "..." : link.TargetUrl)
                                     </a>
                                 </td>
                                 <td><strong>@link.Visits.Count</strong></td>
                                 <td>@link.CreatedAt.ToString("dd.MM.yyyy HH:mm")</td>
                                 <td>
-                                    <button class="btn" onclick="copyLink('@link.Id')">
+                                    <button class="btn" onclick="copyPrettyLink('@link.Id')">
                                         Копировать
                                     </button>
                                     <a href="/api/tracker/delete/@link.Id" 
@@ -420,9 +452,22 @@
             });
         }
         
-        function copyLink(linkId) {
-            const link = window.location.origin + '/track/' + linkId;
-            copyToClipboard(link);
+        function copyPrettyLink(linkId) {
+            const prettyDomains = [
+                "go.link",
+                "click.pro", 
+                "redirect.me",
+                "url.short",
+                "lnk.to",
+                "go.to"
+            ];
+            const domain = prettyDomains[Math.floor(Math.random() * prettyDomains.length)];
+            const prettyLink = `https://${domain}/${linkId}`;
+            
+            copyToClipboard(prettyLink);
+            
+            // Показываем уведомление
+            alert(`Скопировано: ${prettyLink}\n\nФактическая ссылка: ${window.location.origin}/track/${linkId}`);
         }
         
         // Автообновление каждые 30 секунд
@@ -432,15 +477,3 @@
     </script>
 </body>
 </html>
-
-@functions {
-    private string GetBrowserName(string userAgent)
-    {
-        if (string.IsNullOrEmpty(userAgent)) return "Неизвестно";
-        if (userAgent.Contains("Chrome")) return "Chrome";
-        if (userAgent.Contains("Firefox")) return "Firefox";
-        if (userAgent.Contains("Safari")) return "Safari";
-        if (userAgent.Contains("Edge")) return "Edge";
-        return "Другой";
-    }
-}
