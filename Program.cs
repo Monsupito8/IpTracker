@@ -1,6 +1,9 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using IpTracker.Data;
-using IpTracker.Models; // ← ДОБАВЬТЕ ЭТУ СТРОКУ!
+using System;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,108 +55,155 @@ app.MapControllers();
 // 9. Маршруты для страниц (админка)
 app.MapRazorPages();
 
-// 10. Важно: Маршрут для трекинга должен быть перед главной страницей
-app.MapGet("/track/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
-{
-    try
-    {
-        var link = await db.TrackingLinks.FindAsync(id);
-        if (link == null)
-        {
-            return Results.NotFound("Ссылка не найдена");
-        }
-
-        // Сохраняем посещение
-        var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
-        var userAgent = context.Request.Headers["User-Agent"].ToString();
-        var referer = context.Request.Headers["Referer"].ToString();
-
-        var visit = new LinkVisit
-        {
-            LinkId = id,
-            VisitorIp = clientIp,
-            UserAgent = userAgent,
-            Referer = string.IsNullOrEmpty(referer) ? null : referer,
-            VisitedAt = DateTime.UtcNow
-        };
-
-        db.LinkVisits.Add(visit);
-        await db.SaveChangesAsync();
-
-        Console.WriteLine($"🔗 Переход по ссылке {id} от IP: {clientIp}");
-
-        // Перенаправляем
-        return Results.Redirect(link.TargetUrl);
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"❌ Ошибка при обработке перехода: {ex.Message}");
-        return Results.Redirect("https://google.com");
-    }
-});
-
-// 11. Главная страница с перенаправлением
+// 10. Главная страница с перенаправлением
 app.MapGet("/", () => Results.Content(@"
 <!DOCTYPE html>
 <html>
 <head>
     <meta http-equiv='refresh' content='0; url=/admin'>
     <title>IP Tracker</title>
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            height: 100vh; 
-            margin: 0; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .loading {
-            text-align: center;
-        }
-        .spinner {
-            border: 8px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top: 8px solid white;
-            width: 60px;
-            height: 60px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-        @@keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
 </head>
 <body>
-    <div class='loading'>
-        <div class='spinner'></div>
-        <h2>Перенаправление в админ-панель...</h2>
-        <p>IP Tracker запущен</p>
-    </div>
+    <p>Перенаправление в админ-панель...</p>
 </body>
 </html>", "text/html"));
 
-// 12. Тестовая страница для проверки
-app.MapGet("/test", async (ApplicationDbContext db) =>
+// Обработка формы создания ссылки
+app.MapPost("/api/tracker/generate", async (HttpContext context, ApplicationDbContext db) =>
 {
-    var links = await db.TrackingLinks.ToListAsync();
-    var visits = await db.LinkVisits.ToListAsync();
-    
-    return Results.Content($@"
-        <h1>Тест базы данных</h1>
-        <p>Ссылок: {links.Count}</p>
-        <p>Посещений: {visits.Count}</p>
-        <h3>Последние 5 посещений:</h3>
-        <ul>
-            {string.Join("", visits.Take(5).Select(v => 
-                $"<li>ID: {v.Id}, Link: {v.LinkId}, IP: {v.VisitorIp}, Time: {v.VisitedAt}</li>"))}
-        </ul>
-        <a href='/admin'>Админка</a>
-    ", "text/html");
+    var form = await context.Request.ReadFormAsync();
+    var targetUrl = form["TargetUrl"].ToString();
+    var note = form["Note"].ToString();
+
+    if (string.IsNullOrEmpty(targetUrl))
+    {
+        context.Response.Redirect("/admin?error=Введите+URL");
+        return;
+    }
+
+    try
+    {
+        if (!targetUrl.StartsWith("http://") && !targetUrl.StartsWith("https://"))
+        {
+            targetUrl = "https://" + targetUrl;
+        }
+
+        var linkId = Guid.NewGuid().ToString("N").Substring(0, 8);
+
+        var trackingLink = new TrackingLink
+        {
+            Id = linkId,
+            CreatedAt = DateTime.UtcNow,
+            CreatorIp = context.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+            Note = note?.Trim(),
+            TargetUrl = targetUrl.Trim()
+        };
+
+        db.TrackingLinks.Add(trackingLink);
+        await db.SaveChangesAsync();
+
+        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+        var trackingUrl = $"{baseUrl}/track/{linkId}";
+
+        context.Response.Redirect($"/admin?message=Ссылка+создана&newLink={trackingUrl}&targetUrl={Uri.EscapeDataString(targetUrl)}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Ошибка создания ссылки: {ex.Message}");
+        context.Response.Redirect("/admin?error=Ошибка+создания+ссылки");
+    }
+});
+
+// Удаление ссылки
+app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db, HttpContext context) =>
+{
+    try
+    {
+        var link = await db.TrackingLinks
+            .Include(l => l.Visits)
+            .FirstOrDefaultAsync(l => l.Id == id);
+
+        if (link == null)
+        {
+            context.Response.Redirect("/admin?error=Ссылка+не+найдена");
+            return;
+        }
+
+        int visitsCount = link.Visits.Count;
+
+        db.LinkVisits.RemoveRange(link.Visits);
+        db.TrackingLinks.Remove(link);
+        await db.SaveChangesAsync();
+
+        context.Response.Redirect($"/admin?message=Ссылка+удалена.+Удалено+{visitsCount}+посещений");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Ошибка удаления ссылки: {ex.Message}");
+        context.Response.Redirect("/admin?error=Ошибка+удаления");
+    }
 });
 
 app.Run();
+
+// ========== МОДЕЛИ И КЛАССЫ В ОДНОМ ФАЙЛЕ ==========
+
+public class TrackingLink
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public string CreatorIp { get; set; } = string.Empty;
+    public string? Note { get; set; }
+    public string TargetUrl { get; set; } = string.Empty;
+    
+    public List<LinkVisit> Visits { get; set; } = new();
+}
+
+public class LinkVisit
+{
+    public int Id { get; set; }
+    public string LinkId { get; set; } = string.Empty;
+    public string VisitorIp { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
+    public string? Referer { get; set; }
+    public DateTime VisitedAt { get; set; }
+    
+    public TrackingLink? Link { get; set; }
+}
+
+public class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options)
+    {
+    }
+    
+    public DbSet<TrackingLink> TrackingLinks { get; set; }
+    public DbSet<LinkVisit> LinkVisits { get; set; }
+    
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        
+        modelBuilder.Entity<TrackingLink>()
+            .HasKey(t => t.Id);
+            
+        modelBuilder.Entity<LinkVisit>()
+            .HasKey(v => v.Id);
+            
+        modelBuilder.Entity<LinkVisit>()
+            .HasOne(v => v.Link)
+            .WithMany(l => l.Visits)
+            .HasForeignKey(v => v.LinkId);
+    }
+}
+
+// Добавьте этот статический класс в Program.cs после всех других классов
+public static class StringExtensions
+{
+    public static string Truncate(this string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+    }
+}

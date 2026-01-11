@@ -1,14 +1,16 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY ["IpTracker.csproj", "./"]
 RUN dotnet restore "IpTracker.csproj"
 COPY . .
+RUN dotnet build "IpTracker.csproj" -c Release -o /app/build
+
+FROM build AS publish
 RUN dotnet publish "IpTracker.csproj" -c Release -o /app/publish
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
-COPY --from=build /app/publish .
-ENV ASPNETCORE_ENVIRONMENT=Production
-ENV ASPNETCORE_URLS=http://0.0.0.0:8080
+COPY --from=publish /app/publish .
+ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "IpTracker.dll"]
