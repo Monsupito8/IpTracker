@@ -37,9 +37,14 @@ using (var scope = app.Services.CreateScope())
 }
 
 // 6. Для продакшена используем HTTPS и обработку ошибок
-if (!app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Error");
+    app.UseDeveloperExceptionPage();
+}
+else
+{
+    // Убедись что есть этот маршрут
+    app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
 }
 
@@ -329,6 +334,91 @@ app.MapGet("/api/tracker/delete/{id}", async (string id, ApplicationDbContext db
         context.Response.Redirect("/admin?error=Ошибка+удаления");
     }
 });
+
+// Маршрут для страницы ошибки
+app.MapGet("/error", () => Results.Content(@"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ошибка - IP Tracker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            text-align: center;
+            padding: 50px;
+        }
+        .error-box {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #dc3545;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class='error-box'>
+        <h1>⚠️ Что-то пошло не так</h1>
+        <p>Произошла ошибка при обработке вашего запроса.</p>
+        <p>Попробуйте вернуться на главную страницу.</p>
+        <a href='/' class='btn'>На главную</a>
+        <a href='/admin' class='btn' style='background:#28a745;'>В админку</a>
+    </div>
+</body>
+</html>", "text/html"));
+
+// Или лучше перенаправление на главную при ошибках
+app.MapGet("/Home/Error", () => Results.Redirect("/error"));
+
+// Страница Privacy
+app.MapGet("/Privacy", () => Results.Content(@"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Политика конфиденциальности - IP Tracker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #007bff;
+        }
+        .back {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class='back'>
+        <a href='/' style='color:#007bff; text-decoration:none;'>← Назад</a>
+    </div>
+    <h1>Политика конфиденциальности</h1>
+    <p>IP Tracker собирает только необходимую информацию для работы сервиса.</p>
+    <p>Все данные защищены и не передаются третьим лицам.</p>
+</body>
+</html>", "text/html"));
+
+// Главная страница (Home)
+app.MapGet("/Home", () => Results.Redirect("/"));
+app.MapGet("/Home/Index", () => Results.Redirect("/"));
 
 app.Run();
 
