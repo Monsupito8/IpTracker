@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using IpTracker.Data;
+using IpTracker.Models; // ← ДОБАВЬТЕ ЭТУ СТРОКУ!
 
 var builder = WebApplication.CreateBuilder(args);
 
